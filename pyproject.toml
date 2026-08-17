@@ -1,0 +1,42 @@
+[project]
+name = "atp"
+version = "0.1.0"
+description = "AI Trading Platform modular monolith foundation"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[project.scripts]
+atp-diagnostic = "atp.diagnostic:main"
+
+[dependency-groups]
+dev = [
+  "mypy==1.17.1",
+  "pytest==8.4.1",
+  "ruff==0.12.9",
+]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/atp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["atp"]
