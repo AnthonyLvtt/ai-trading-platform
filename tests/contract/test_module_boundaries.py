@@ -8,7 +8,19 @@ from typing import NoReturn
 
 import pytest
 
+SHARED_MODULES = [
+    "atp.shared",
+    "atp.shared.config",
+    "atp.shared.environment",
+    "atp.shared.errors",
+    "atp.shared.identity",
+    "atp.shared.result",
+    "atp.shared.serialization",
+    "atp.shared.time",
+]
+
 MODULES = [
+    *SHARED_MODULES,
     "atp.data",
     "atp.strategy",
     "atp.risk",

@@ -38,7 +38,7 @@ The diagnostic loads an explicit environment, emits a structured JSON log, and d
 
 ## Repository layout
 
-- `src/atp/shared` — technical primitives only
+- `src/atp/shared` — typed identifiers, canonical content identity, UTC clocks and common technical primitives
 - `src/atp/data` — Market Data boundary
 - `src/atp/strategy` — Strategy boundary
 - `src/atp/risk` — Risk boundary
