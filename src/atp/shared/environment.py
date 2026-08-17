@@ -15,7 +15,7 @@ class Environment(StrEnum):
     LIVE = "LIVE"
 
     @classmethod
-    def parse(cls, raw: str) -> "Environment":
+    def parse(cls, raw: str) -> Environment:
         try:
             return cls(raw.strip().upper())
         except ValueError as exc:
@@ -29,7 +29,5 @@ ACTIVE_FOUNDATION_ENVIRONMENTS = frozenset(
 
 def require_foundation_environment(environment: Environment) -> Environment:
     if environment not in ACTIVE_FOUNDATION_ENVIRONMENTS:
-        raise ConfigurationError(
-            f"environment {environment.value} is not enabled by ENG-FOUND-001"
-        )
+        raise ConfigurationError(f"environment {environment.value} is not enabled by ENG-FOUND-001")
     return environment

@@ -4,11 +4,30 @@ import json
 import logging
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
+from typing import cast
 
 _RESERVED = {
-    "name", "msg", "args", "levelname", "levelno", "pathname", "filename", "module",
-    "exc_info", "exc_text", "stack_info", "lineno", "funcName", "created", "msecs",
-    "relativeCreated", "thread", "threadName", "processName", "process", "taskName",
+    "name",
+    "msg",
+    "args",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+    "lineno",
+    "funcName",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+    "taskName",
 }
 
 
@@ -38,7 +57,10 @@ class SecretRedactionFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = _redact(record.msg, self.secrets)
-        record.args = _redact(record.args, self.secrets)
+        record.args = cast(
+            tuple[object, ...] | Mapping[str, object] | None,
+            _redact(record.args, self.secrets),
+        )
         for key, value in tuple(record.__dict__.items()):
             if key not in _RESERVED:
                 setattr(record, key, _redact(value, self.secrets))

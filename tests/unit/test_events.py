@@ -6,8 +6,8 @@ import pytest
 
 from atp.observability.events import DomainEvent
 from atp.shared.environment import Environment
-from atp.shared.identity import EventId
 from atp.shared.errors import ValidationError
+from atp.shared.identity import EventId
 
 
 def test_domain_event_preserves_occurred_and_observed_time() -> None:

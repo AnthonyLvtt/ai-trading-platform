@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import logging
-
-from atp.shared.config import AppConfig
 from atp.observability.logging import configure_structured_logging
+from atp.shared.config import AppConfig
 
 
 def run_diagnostic(config: AppConfig) -> None:

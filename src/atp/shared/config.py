@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from atp.shared.environment import Environment, require_foundation_environment
 from atp.shared.errors import ConfigurationError
@@ -23,7 +23,7 @@ class AppConfig:
     log_level: str = "INFO"
 
     @classmethod
-    def from_env(cls, environ: Mapping[str, str] | None = None) -> "AppConfig":
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> AppConfig:
         values = os.environ if environ is None else environ
         raw_environment = values.get("ATP_ENV")
         if not raw_environment:
