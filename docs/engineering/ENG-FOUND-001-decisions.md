@@ -44,7 +44,7 @@ Only a minimal repository Protocol is introduced. No database, distributed log, 
 - Binance adapter behavior.
 - Web UI.
 - full observability infrastructure.
-- CI/CD automation and deployment.
+- Deployment automation.
 - Live trading.
 
 ### Normative sources reviewed

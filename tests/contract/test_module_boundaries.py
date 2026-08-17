@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import socket
+import sys
+from collections.abc import Callable
+from typing import NoReturn
 
 import pytest
 
@@ -12,15 +16,42 @@ MODULES = [
     "atp.accounting",
     "atp.backtesting",
     "atp.observability",
-    "atp.qualification",
+    "atp.test_qualification",
     "atp.ops",
     "atp.web",
     "atp.exchange",
-    "atp.release",
+    "atp.release_deployment",
     "atp.persistence",
 ]
 
 
+def _block_network(*args: object, **kwargs: object) -> NoReturn:
+    del args, kwargs
+    raise AssertionError("network access is forbidden while importing ATP modules")
+
+
+@pytest.fixture
+def block_network(monkeypatch: pytest.MonkeyPatch) -> Callable[..., NoReturn]:
+    monkeypatch.setattr(socket, "create_connection", _block_network)
+    monkeypatch.setattr(socket, "getaddrinfo", _block_network)
+    monkeypatch.setattr(socket.socket, "connect", _block_network)
+    monkeypatch.setattr(socket.socket, "connect_ex", _block_network)
+    return _block_network
+
+
+def test_network_guard_rejects_connection_attempt(
+    block_network: Callable[..., NoReturn],
+) -> None:
+    del block_network
+    with pytest.raises(AssertionError, match="network access is forbidden"):
+        socket.create_connection(("exchange.invalid", 443))
+
+
 @pytest.mark.parametrize("module_name", MODULES)
-def test_module_import_has_no_exchange_side_effect(module_name: str) -> None:
+def test_module_import_has_no_exchange_side_effect(
+    module_name: str,
+    block_network: Callable[..., NoReturn],
+) -> None:
+    del block_network
+    sys.modules.pop(module_name, None)
     assert importlib.import_module(module_name) is not None

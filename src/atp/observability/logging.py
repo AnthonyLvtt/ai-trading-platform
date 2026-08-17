@@ -33,19 +33,31 @@ _RESERVED = {
 
 def _redact(value: object, secrets: tuple[str, ...]) -> object:
     if isinstance(value, str):
-        redacted = value
-        for secret in secrets:
-            redacted = redacted.replace(secret, "[REDACTED]")
-        return redacted
+        return _redact_text(value, secrets)
+    if value is None or isinstance(value, bool | int | float):
+        return value
     if isinstance(value, Mapping):
-        return {key: _redact(item, secrets) for key, item in value.items()}
-    if isinstance(value, tuple):
-        return tuple(_redact(item, secrets) for item in value)
-    if isinstance(value, list):
+        return {
+            _redact_text(_safe_string(key), secrets): _redact(item, secrets)
+            for key, item in value.items()
+        }
+    if isinstance(value, tuple | list | set | frozenset):
         return [_redact(item, secrets) for item in value]
-    if isinstance(value, set):
-        return {_redact(item, secrets) for item in value}
-    return value
+    return _redact_text(_safe_string(value), secrets)
+
+
+def _redact_text(value: str, secrets: tuple[str, ...]) -> str:
+    redacted = value
+    for secret in secrets:
+        redacted = redacted.replace(secret, "[REDACTED]")
+    return redacted
+
+
+def _safe_string(value: object) -> str:
+    try:
+        return str(value)
+    except Exception:  # noqa: BLE001 - logging must fail closed for arbitrary objects
+        return "[UNSERIALIZABLE]"
 
 
 class SecretRedactionFilter(logging.Filter):
@@ -85,7 +97,7 @@ class JsonFormatter(logging.Formatter):
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         sanitized = _redact(payload, self._secrets)
-        return json.dumps(sanitized, sort_keys=True, default=str)
+        return json.dumps(sanitized, sort_keys=True)
 
 
 def configure_structured_logging(

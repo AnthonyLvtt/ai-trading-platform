@@ -1,6 +1,6 @@
-# ATP — AI Trading Platform
+# AI Trading Platform
 
-ATP is a modular algorithmic-trading platform. The current repository phase is **engineering foundation only**: no real trading, no Binance integration, and no Live credentials are required.
+ATP is a modular algorithmic-trading platform. This repository contains only its engineering foundation: no real trading, Binance integration, or Live credentials are enabled.
 
 ## Requirements
 
@@ -46,11 +46,11 @@ The diagnostic loads an explicit environment, emits a structured JSON log, and d
 - `src/atp/accounting` — Accounting boundary
 - `src/atp/backtesting` — Backtesting/Simulation boundary
 - `src/atp/observability` — structured logs/events
-- `src/atp/qualification` — TEST/qualification boundary
+- `src/atp/test_qualification` — TEST/qualification boundary
 - `src/atp/ops` — Operations boundary
 - `src/atp/web` — Web supervision boundary
 - `src/atp/exchange` — Exchange Adapter boundary
-- `src/atp/release` — Release/Deployment boundary
+- `src/atp/release_deployment` — Release/Deployment boundary
 - `src/atp/persistence` — persistence ports/adapters boundary
 - `tests/unit` — unit tests
 - `tests/contract` — boundary/contract tests
@@ -60,6 +60,6 @@ The diagnostic loads an explicit environment, emits a structured JSON log, and d
 
 ## Normative authority
 
-Accepted ATP normative documents are the source of truth. Their canonical repository location is under `docs`; this foundation change includes the supplied ADR-001/ADR-002 and does not recreate missing SPEC files from secondary references. Code must not silently redefine domain state machines or authority boundaries.
+Accepted ATP normative documents under `docs` are the source of truth. Code must not silently redefine domain state machines or authority boundaries.
 
 See `CONTRIBUTING.md` and `docs/engineering/ENG-FOUND-001-decisions.md`.
