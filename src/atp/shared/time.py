@@ -19,6 +19,8 @@ def require_utc(value: datetime) -> datetime:
 
 @dataclass(frozen=True, slots=True)
 class LogicalTime:
+    """UTC timestamp primitive without distributed-clock or Lamport semantics."""
+
     value: datetime
 
     def __post_init__(self) -> None:

@@ -4,7 +4,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from atp.shared.environment import Environment, require_foundation_environment
+from atp.shared.environment import Environment, require_active_environment
 from atp.shared.errors import ConfigurationError
 
 LIVE_CREDENTIAL_ENV_KEYS = frozenset(
@@ -29,7 +29,7 @@ class AppConfig:
         if not raw_environment:
             raise ConfigurationError("ATP_ENV is required; no environment fallback is allowed")
 
-        environment = require_foundation_environment(Environment.parse(raw_environment))
+        environment = require_active_environment(Environment.parse(raw_environment))
         log_level = values.get("ATP_LOG_LEVEL", "INFO").upper()
         if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ConfigurationError(f"invalid ATP_LOG_LEVEL: {log_level!r}")

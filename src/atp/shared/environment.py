@@ -22,12 +22,12 @@ class Environment(StrEnum):
             raise ConfigurationError(f"unknown environment: {raw!r}") from exc
 
 
-ACTIVE_FOUNDATION_ENVIRONMENTS = frozenset(
+ACTIVE_ENVIRONMENTS = frozenset(
     {Environment.LOCAL, Environment.TEST, Environment.BACKTEST, Environment.SIMULATION}
 )
 
 
-def require_foundation_environment(environment: Environment) -> Environment:
-    if environment not in ACTIVE_FOUNDATION_ENVIRONMENTS:
-        raise ConfigurationError(f"environment {environment.value} is not enabled by ENG-FOUND-001")
+def require_active_environment(environment: Environment) -> Environment:
+    if environment not in ACTIVE_ENVIRONMENTS:
+        raise ConfigurationError(f"environment {environment.value} is not enabled")
     return environment
