@@ -19,9 +19,20 @@ SHARED_MODULES = [
     "atp.shared.time",
 ]
 
+DATA_MODULES = [
+    "atp.data",
+    "atp.data.backfill",
+    "atp.data.consumption",
+    "atp.data.identity",
+    "atp.data.lineage",
+    "atp.data.snapshot",
+    "atp.data.temporal",
+    "atp.data.universe",
+]
+
 MODULES = [
     *SHARED_MODULES,
-    "atp.data",
+    *DATA_MODULES,
     "atp.strategy",
     "atp.risk",
     "atp.oms",
