@@ -20,8 +20,8 @@ build/
 .DS_Store
 
 # Local datasets / generated artifacts
-data/
-datasets/
-artifacts/
+/data/
+/datasets/
+/artifacts/
 *.parquet
 *.duckdb
