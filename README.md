@@ -1,6 +1,6 @@
 # AI Trading Platform
 
-ATP is a modular algorithmic-trading platform. This repository contains only its engineering foundation: no real trading, Binance integration, or Live credentials are enabled.
+ATP is a modular algorithmic-trading platform. This repository contains its engineering foundation and initial Market Data primitives. No real trading, Binance integration, or Live credentials are enabled.
 
 ## Requirements
 
@@ -39,7 +39,7 @@ The diagnostic loads an explicit environment, emits a structured JSON log, and d
 ## Repository layout
 
 - `src/atp/shared` — typed identifiers, canonical content identity, UTC clocks and common technical primitives
-- `src/atp/data` — Market Data boundary
+- `src/atp/data` — immutable Market Data snapshots, causal historical views, lineage, and universe primitives
 - `src/atp/strategy` — Strategy boundary
 - `src/atp/risk` — Risk boundary
 - `src/atp/oms` — OMS boundary
