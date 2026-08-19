@@ -31,9 +31,13 @@ Associating one `SnapshotId` with different content identities is an explicit in
 
 Quality (`VALID`, `DEGRADED`, `INVALID`, `UNKNOWN`) and freshness (`FRESH`, `STALE`, `UNKNOWN`) remain independent fields. `DEGRADED` data requires explicit degradation reasons and an explicit matching consumer allowance. Gap state is explicit and known gaps preserve their interval and reason. Points distinguish `PROVISIONAL` from `FINAL`.
 
+Consumer contracts must explicitly list accepted gap states and point finalities. `KNOWN_GAP`, `GAP_STATUS_UNKNOWN`, and `PROVISIONAL` therefore fail closed unless the consumer names them explicitly.
+
 ## Temporal causality
 
 Every point records `event_time`, optional `provider_time`, `ingested_at`, and `available_at` as UTC. Historical reads use `available_at`, never `event_time` alone. A versioned `AvailabilityRule` can derive `available_at` deterministically and remains attached to the resulting temporal evidence.
+
+Historical replay evaluates `validation_as_of_use`; current-state checks evaluate `current_validation_status` through a separate API. A late invalidation remains visible to current checks without rewriting the validation evidence used by a past reproducible run.
 
 ## Backfill
 

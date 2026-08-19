@@ -54,12 +54,13 @@ def point(
     symbol: str = "BTCUSDT",
     close: str = "100.00",
     timing: TemporalMetadata | None = None,
+    finality: DataFinality = DataFinality.FINAL,
 ) -> DataPoint:
     return DataPoint.from_value(
         symbol=symbol,
         value={"close": close},
         temporal=timing or temporal(),
-        finality=DataFinality.FINAL,
+        finality=finality,
     )
 
 
@@ -114,6 +115,8 @@ def valid_contract() -> ConsumerContract:
     return ConsumerContract(
         accepted_quality=frozenset({DataQuality.VALID}),
         accepted_freshness=frozenset({FreshnessStatus.FRESH}),
+        accepted_finality=frozenset({DataFinality.FINAL}),
+        accepted_gap_statuses=frozenset({GapStatus.NO_GAP_DETECTED}),
     )
 
 
@@ -288,15 +291,19 @@ def test_degraded_data_is_fail_closed_without_explicit_consumer_permission() -> 
     denied = ConsumerContract(
         accepted_quality=frozenset({DataQuality.DEGRADED}),
         accepted_freshness=frozenset({FreshnessStatus.FRESH}),
+        accepted_finality=frozenset({DataFinality.FINAL}),
+        accepted_gap_statuses=frozenset({GapStatus.NO_GAP_DETECTED}),
     )
     allowed = ConsumerContract(
         accepted_quality=frozenset({DataQuality.DEGRADED}),
         accepted_freshness=frozenset({FreshnessStatus.FRESH}),
+        accepted_finality=frozenset({DataFinality.FINAL}),
+        accepted_gap_statuses=frozenset({GapStatus.NO_GAP_DETECTED}),
         allowed_degradations=frozenset({"known-gap"}),
     )
 
-    assert not denied.accepts(degraded)
-    assert allowed.accepts(degraded)
+    assert not denied.accepts_historical(degraded)
+    assert allowed.accepts_historical(degraded)
 
 
 def test_known_gaps_are_explicit_and_preserved() -> None:
@@ -326,6 +333,87 @@ def test_late_invalidation_preserves_validation_as_of_use() -> None:
     assert invalidated.validation_as_of_use is DataQuality.VALID
     assert invalidated.current_validation_status is DataQuality.INVALID
     assert invalidated.content_identity == used.content_identity
+    assert valid_contract().accepts_historical(invalidated)
+    assert not valid_contract().accepts_current(invalidated)
+
+
+def test_historical_view_rejects_provisional_point_without_explicit_permission() -> None:
+    provisional = point(finality=DataFinality.PROVISIONAL)
+
+    with pytest.raises(DomainError, match="finality"):
+        build_historical_view(
+            snapshot=snapshot(points=(provisional,)),
+            universe=universe(),
+            as_of=T1,
+            contract=valid_contract(),
+        )
+
+
+def test_historical_view_accepts_provisional_point_when_explicitly_permitted() -> None:
+    provisional = point(finality=DataFinality.PROVISIONAL)
+    contract = ConsumerContract(
+        accepted_quality=frozenset({DataQuality.VALID}),
+        accepted_freshness=frozenset({FreshnessStatus.FRESH}),
+        accepted_finality=frozenset({DataFinality.PROVISIONAL}),
+        accepted_gap_statuses=frozenset({GapStatus.NO_GAP_DETECTED}),
+    )
+
+    result = build_historical_view(
+        snapshot=snapshot(points=(provisional,)),
+        universe=universe(),
+        as_of=T1,
+        contract=contract,
+    )
+
+    assert result.points == (provisional,)
+
+
+@pytest.mark.parametrize("gap_status", [GapStatus.KNOWN_GAP, GapStatus.GAP_STATUS_UNKNOWN])
+def test_consumer_rejects_non_clean_gap_status_without_explicit_permission(
+    gap_status: GapStatus,
+) -> None:
+    gaps = (Gap(T0, T1, "missing candle"),) if gap_status is GapStatus.KNOWN_GAP else ()
+    quality = DataQuality.DEGRADED if gap_status is GapStatus.KNOWN_GAP else DataQuality.VALID
+    reasons = frozenset({"known-gap"}) if gap_status is GapStatus.KNOWN_GAP else frozenset()
+    candidate = snapshot(
+        quality=quality,
+        gap_status=gap_status,
+        gaps=gaps,
+        degradation_reasons=reasons,
+    )
+    contract = ConsumerContract(
+        accepted_quality=frozenset({DataQuality.VALID, DataQuality.DEGRADED}),
+        accepted_freshness=frozenset({FreshnessStatus.FRESH}),
+        accepted_finality=frozenset({DataFinality.FINAL}),
+        accepted_gap_statuses=frozenset({GapStatus.NO_GAP_DETECTED}),
+        allowed_degradations=frozenset({"known-gap"}),
+    )
+
+    assert not contract.accepts_historical(candidate)
+
+
+@pytest.mark.parametrize("gap_status", [GapStatus.KNOWN_GAP, GapStatus.GAP_STATUS_UNKNOWN])
+def test_consumer_accepts_non_clean_gap_status_only_when_explicitly_permitted(
+    gap_status: GapStatus,
+) -> None:
+    gaps = (Gap(T0, T1, "missing candle"),) if gap_status is GapStatus.KNOWN_GAP else ()
+    quality = DataQuality.DEGRADED if gap_status is GapStatus.KNOWN_GAP else DataQuality.VALID
+    reasons = frozenset({"known-gap"}) if gap_status is GapStatus.KNOWN_GAP else frozenset()
+    candidate = snapshot(
+        quality=quality,
+        gap_status=gap_status,
+        gaps=gaps,
+        degradation_reasons=reasons,
+    )
+    contract = ConsumerContract(
+        accepted_quality=frozenset({DataQuality.VALID, DataQuality.DEGRADED}),
+        accepted_freshness=frozenset({FreshnessStatus.FRESH}),
+        accepted_finality=frozenset({DataFinality.FINAL}),
+        accepted_gap_statuses=frozenset({gap_status}),
+        allowed_degradations=frozenset({"known-gap"}),
+    )
+
+    assert contract.accepts_historical(candidate)
 
 
 def test_lineage_identity_is_reproducible() -> None:
