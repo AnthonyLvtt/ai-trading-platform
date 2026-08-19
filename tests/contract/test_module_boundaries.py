@@ -30,10 +30,17 @@ DATA_MODULES = [
     "atp.data.universe",
 ]
 
+STRATEGY_MODULES = [
+    "atp.strategy",
+    "atp.strategy.identity",
+    "atp.strategy.model",
+    "atp.strategy.sma",
+]
+
 MODULES = [
     *SHARED_MODULES,
     *DATA_MODULES,
-    "atp.strategy",
+    *STRATEGY_MODULES,
     "atp.risk",
     "atp.oms",
     "atp.accounting",
