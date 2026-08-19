@@ -105,6 +105,7 @@ def test_data_to_strategy_to_risk_decision_vertical_slice() -> None:
     risk_context = RiskEvaluationContext(
         strategy_evaluation=strategy_result,
         market_context=RiskMarketContext(
+            symbol="BTCUSDT",
             market_type=MarketType.SPOT,
             position_direction=PositionDirection.LONG,
             margin_enabled=False,

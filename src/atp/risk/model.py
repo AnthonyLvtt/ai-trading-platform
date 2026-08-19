@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
@@ -23,6 +24,7 @@ class RiskReasonCode(StrEnum):
     STRATEGY_INPUT_INCOMPLETE = "STRATEGY_INPUT_INCOMPLETE"
     STRATEGY_INPUT_NOT_REPRODUCIBLE = "STRATEGY_INPUT_NOT_REPRODUCIBLE"
     STRATEGY_CONTEXT_INCOMPATIBLE = "STRATEGY_CONTEXT_INCOMPATIBLE"
+    MARKET_SYMBOL_MISMATCH = "MARKET_SYMBOL_MISMATCH"
     UNKNOWN_ENVIRONMENT = "UNKNOWN_ENVIRONMENT"
     ENVIRONMENT_NOT_ACTIVE = "ENVIRONMENT_NOT_ACTIVE"
     MARKET_CONTEXT_INCOMPLETE = "MARKET_CONTEXT_INCOMPLETE"
@@ -73,6 +75,7 @@ class PositionSide(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class RiskMarketContext:
+    symbol: str | None
     market_type: MarketType | None
     position_direction: PositionDirection | None
     margin_enabled: bool | None
@@ -83,16 +86,16 @@ class RiskMarketContext:
     def canonical_value(self) -> dict[str, object]:
         leverage = self.leverage
         return {
-            "environment": self.environment,
-            "instrument_class": None
-            if self.instrument_class is None
-            else self.instrument_class.value,
-            "leverage": None if leverage is None else str(leverage),
-            "margin_enabled": self.margin_enabled,
-            "market_type": None if self.market_type is None else self.market_type.value,
-            "position_direction": None
-            if self.position_direction is None
-            else self.position_direction.value,
+            "environment": _canonical_string(self.environment),
+            "instrument_class": _canonical_enum(self.instrument_class, InstrumentClass),
+            "leverage": _canonical_decimal(leverage),
+            "margin_enabled": _canonical_bool(self.margin_enabled),
+            "market_type": _canonical_enum(self.market_type, MarketType),
+            "position_direction": _canonical_enum(
+                self.position_direction,
+                PositionDirection,
+            ),
+            "symbol": _canonical_string(self.symbol),
         }
 
     @property
@@ -101,7 +104,7 @@ class RiskMarketContext:
 
     @property
     def leverage_is_finite(self) -> bool:
-        return self.leverage is not None and self.leverage.is_finite()
+        return isinstance(self.leverage, Decimal) and self.leverage.is_finite()
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,14 +114,20 @@ class OpenPosition:
     side: PositionSide
 
     def __post_init__(self) -> None:
-        if not self.symbol or self.symbol.strip() != self.symbol:
+        if (
+            not isinstance(self.symbol, str)
+            or not self.symbol
+            or self.symbol.strip() != self.symbol
+        ):
             raise ValidationError("Open position symbol must be non-empty and trimmed")
 
-    def canonical_value(self) -> dict[str, str]:
+    def canonical_value(self) -> dict[str, object]:
         return {
-            "position_id": str(self.position_id),
-            "side": self.side.value,
-            "symbol": self.symbol,
+            "position_id": str(self.position_id)
+            if isinstance(self.position_id, PositionId)
+            else _invalid_runtime_value(self.position_id),
+            "side": _canonical_enum(self.side, PositionSide),
+            "symbol": _canonical_string(self.symbol),
         }
 
 
@@ -139,15 +148,13 @@ class PortfolioState:
         )
 
     def canonical_value(self) -> dict[str, object]:
+        positions = self.positions
         return {
-            "knowledge_status": self.knowledge_status.value,
-            "positions": [
-                position.canonical_value()
-                for position in sorted(
-                    self.positions,
-                    key=lambda position: str(position.position_id),
-                )
-            ],
+            "knowledge_status": _canonical_enum(
+                self.knowledge_status,
+                PortfolioKnowledgeStatus,
+            ),
+            "positions": _canonical_positions(positions),
         }
 
     @property
@@ -317,6 +324,7 @@ def _reason_matches_status(status: RiskStatus, reason_code: RiskReasonCode) -> b
         RiskReasonCode.STRATEGY_INPUT_INCOMPLETE,
         RiskReasonCode.STRATEGY_INPUT_NOT_REPRODUCIBLE,
         RiskReasonCode.STRATEGY_CONTEXT_INCOMPATIBLE,
+        RiskReasonCode.MARKET_SYMBOL_MISMATCH,
         RiskReasonCode.UNKNOWN_ENVIRONMENT,
         RiskReasonCode.ENVIRONMENT_NOT_ACTIVE,
         RiskReasonCode.MARKET_CONTEXT_INCOMPLETE,
@@ -324,3 +332,66 @@ def _reason_matches_status(status: RiskStatus, reason_code: RiskReasonCode) -> b
         RiskReasonCode.PORTFOLIO_STATE_INCONSISTENT,
         RiskReasonCode.PORTFOLIO_POLICY_VIOLATION,
     }
+
+
+def _canonical_enum(value: object, expected_type: type[StrEnum]) -> object:
+    if value is None:
+        return None
+    if isinstance(value, expected_type):
+        return value.value
+    return _invalid_runtime_value(value)
+
+
+def _canonical_string(value: object) -> object:
+    if value is None or isinstance(value, str):
+        return value
+    return _invalid_runtime_value(value)
+
+
+def _canonical_bool(value: object) -> object:
+    if value is None or isinstance(value, bool):
+        return value
+    return _invalid_runtime_value(value)
+
+
+def _canonical_decimal(value: object) -> object:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return str(value)
+    return _invalid_runtime_value(value)
+
+
+def _canonical_positions(value: object) -> object:
+    if not isinstance(value, tuple):
+        return _invalid_runtime_value(value)
+    if not all(isinstance(position, OpenPosition) for position in value):
+        return [
+            position.canonical_value()
+            if isinstance(position, OpenPosition)
+            else _invalid_runtime_value(position)
+            for position in value
+        ]
+    return [
+        position.canonical_value()
+        for position in sorted(
+            value,
+            key=lambda position: str(position.position_id)
+            if isinstance(position.position_id, PositionId)
+            else _runtime_type_name(position.position_id),
+        )
+    ]
+
+
+def _invalid_runtime_value(value: object) -> dict[str, object]:
+    invalid: dict[str, object] = {"invalid_type": _runtime_type_name(value)}
+    if value is None or isinstance(value, str | bool | int):
+        invalid["invalid_value"] = value
+    elif isinstance(value, float):
+        invalid["invalid_value"] = value if math.isfinite(value) else "NON_FINITE"
+    return invalid
+
+
+def _runtime_type_name(value: object) -> str:
+    value_type = type(value)
+    return f"{value_type.__module__}.{value_type.__qualname__}"

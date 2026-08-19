@@ -76,6 +76,7 @@ def market_context(**changes: object) -> RiskMarketContext:
         "margin_enabled": False,
         "market_type": MarketType.SPOT,
         "position_direction": PositionDirection.LONG,
+        "symbol": "BTCUSDT",
     }
     values.update(changes)
     return RiskMarketContext(**values)  # type: ignore[arg-type]
@@ -286,6 +287,46 @@ def test_strategy_and_market_environment_mismatch_is_blocked() -> None:
     assert result.reason_code is RiskReasonCode.STRATEGY_CONTEXT_INCOMPATIBLE
 
 
+def test_strategy_and_market_symbol_mismatch_is_blocked() -> None:
+    result = DeterministicRiskEngine(policy()).evaluate(
+        context(market=market_context(symbol="ETHUSDT"))
+    )
+
+    assert result.status is RiskStatus.BLOCKED
+    assert result.reason_code is RiskReasonCode.MARKET_SYMBOL_MISMATCH
+    assert result.provenance.market_context is not None
+    assert result.provenance.market_context.symbol == "ETHUSDT"
+    assert market_context(symbol="ETHUSDT").content_identity != market_context().content_identity
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    [
+        ({"market_type": "SPOT"}, RiskReasonCode.MARKET_CONTEXT_INCOMPLETE),
+        ({"position_direction": "LONG"}, RiskReasonCode.MARKET_CONTEXT_INCOMPLETE),
+        ({"margin_enabled": 0}, RiskReasonCode.MARKET_CONTEXT_INCOMPLETE),
+        ({"leverage": "1"}, RiskReasonCode.MARKET_CONTEXT_INCOMPLETE),
+        ({"instrument_class": "SPOT"}, RiskReasonCode.MARKET_CONTEXT_INCOMPLETE),
+        ({"symbol": 7}, RiskReasonCode.MARKET_CONTEXT_INCOMPLETE),
+        ({"environment": 7}, RiskReasonCode.UNKNOWN_ENVIRONMENT),
+    ],
+)
+def test_malformed_market_runtime_values_are_blocked_deterministically(
+    changes: dict[str, object],
+    reason: RiskReasonCode,
+) -> None:
+    evaluation_context = context(market=market_context(**changes))
+    engine = DeterministicRiskEngine(policy())
+
+    first = engine.evaluate(evaluation_context)
+    second = engine.evaluate(evaluation_context)
+
+    assert first == second
+    assert first.status is RiskStatus.BLOCKED
+    assert first.reason_code is reason
+    assert first.risk_decision_id is not None
+
+
 @pytest.mark.parametrize(
     ("changes", "reason"),
     [
@@ -349,6 +390,61 @@ def test_missing_or_blocked_strategy_input_is_blocked() -> None:
     assert blocked.reason_code is RiskReasonCode.STRATEGY_INPUT_INCOMPLETE
 
 
+@pytest.mark.parametrize(
+    "portfolio",
+    [
+        PortfolioState("KNOWN_EMPTY", ()),  # type: ignore[arg-type]
+        PortfolioState(PortfolioKnowledgeStatus.KNOWN_EMPTY, []),  # type: ignore[arg-type]
+        PortfolioState(PortfolioKnowledgeStatus.KNOWN_OPEN, ("position",)),  # type: ignore[arg-type]
+    ],
+)
+def test_malformed_portfolio_runtime_values_are_blocked_deterministically(
+    portfolio: PortfolioState,
+) -> None:
+    evaluation_context = context(portfolio=portfolio)
+    engine = DeterministicRiskEngine(policy())
+
+    first = engine.evaluate(evaluation_context)
+    second = engine.evaluate(evaluation_context)
+
+    assert first == second
+    assert first.status is RiskStatus.BLOCKED
+    assert first.reason_code is RiskReasonCode.PORTFOLIO_STATE_INCONSISTENT
+
+
+def test_malformed_position_enum_is_blocked_without_canonicalization_error() -> None:
+    position = open_position()
+    object.__setattr__(position, "side", "LONG")
+    portfolio = PortfolioState(PortfolioKnowledgeStatus.KNOWN_OPEN, (position,))
+
+    result = DeterministicRiskEngine(policy()).evaluate(context(portfolio=portfolio))
+
+    assert result.status is RiskStatus.BLOCKED
+    assert result.reason_code is RiskReasonCode.PORTFOLIO_STATE_INCONSISTENT
+
+
+def test_malformed_top_level_runtime_evidence_is_blocked() -> None:
+    engine = DeterministicRiskEngine(policy())
+    malformed_market = RiskEvaluationContext(
+        strategy_evaluation=strategy_evaluation(),
+        market_context={"symbol": "BTCUSDT"},  # type: ignore[arg-type]
+        portfolio_state=empty_portfolio(),
+    )
+    malformed_strategy = RiskEvaluationContext(
+        strategy_evaluation="LONG_ENTRY",  # type: ignore[arg-type]
+        market_context=market_context(),
+        portfolio_state=empty_portfolio(),
+    )
+
+    market_result = engine.evaluate(malformed_market)
+    strategy_result = engine.evaluate(malformed_strategy)
+
+    assert market_result.status is RiskStatus.BLOCKED
+    assert market_result.reason_code is RiskReasonCode.MARKET_CONTEXT_INCOMPLETE
+    assert strategy_result.status is RiskStatus.BLOCKED
+    assert strategy_result.reason_code is RiskReasonCode.STRATEGY_INPUT_INCOMPLETE
+
+
 def test_tampered_strategy_identity_is_blocked() -> None:
     strategy = strategy_evaluation()
     assert strategy.signal is not None
@@ -358,6 +454,23 @@ def test_tampered_strategy_identity_is_blocked() -> None:
 
     assert result.status is RiskStatus.BLOCKED
     assert result.reason_code is RiskReasonCode.STRATEGY_INPUT_NOT_REPRODUCIBLE
+
+
+def test_malformed_nested_strategy_provenance_is_blocked_without_crashing() -> None:
+    strategy = strategy_evaluation()
+    object.__setattr__(strategy, "provenance", "invalid-provenance")
+
+    result = DeterministicRiskEngine(policy()).evaluate(context(strategy=strategy))
+
+    assert result.status is RiskStatus.BLOCKED
+    assert result.reason_code is RiskReasonCode.STRATEGY_INPUT_NOT_REPRODUCIBLE
+
+
+def test_malformed_evaluation_context_is_blocked_without_crashing() -> None:
+    result = DeterministicRiskEngine(policy()).evaluate("invalid-context")  # type: ignore[arg-type]
+
+    assert result.status is RiskStatus.BLOCKED
+    assert result.reason_code is RiskReasonCode.STRATEGY_INPUT_INCOMPLETE
 
 
 def test_decision_preserves_complete_strategy_and_risk_provenance() -> None:
