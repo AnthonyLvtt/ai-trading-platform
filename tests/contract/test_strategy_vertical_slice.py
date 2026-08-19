@@ -94,4 +94,7 @@ def test_validated_data_to_deterministic_strategy_signal_vertical_slice() -> Non
     assert first.signal.kind is SignalKind.LONG_ENTRY
     assert first.signal.strategy_decision_id is not None
     assert first.provenance.snapshot_id == data.snapshot_id
+    assert first.provenance.schema_version == data.schema_version
+    assert first.provenance.transformation_version == data.transformation_version
+    assert first.provenance.lineage_content_identity == data.lineage.content_identity
     assert first.provenance.universe_snapshot_id == market_universe.universe_snapshot_id

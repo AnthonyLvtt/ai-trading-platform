@@ -34,7 +34,9 @@ Each evaluation covers one symbol. Insufficient history, incompatible DATA or un
 
 ## Provenance and identity
 
-Provenance records the strategy and version, complete immutable configuration and its identity, environment, dataset and snapshot identities, snapshot content identity, universe snapshot and content identities, logical evaluation time, symbol, and every DATA point actually used with its content and temporal evidence.
+Provenance records the strategy and version, complete immutable configuration and its identity, environment, dataset and snapshot identities, snapshot content identity, schema and transformation versions, canonical DATA lineage identity, universe snapshot and content identities, logical evaluation time, symbol, and every DATA point actually used with its content and temporal evidence. Schema, transformation and lineage evidence are explicit because the DATA snapshot content identity covers points and gaps rather than this reproduction metadata.
+
+The effective SMA series must have unique, strictly increasing `event_time` values. A duplicate or non-monotonic timestamp is rejected as `BLOCKED_INPUT`; Strategy never deduplicates, selects a correction, or counts two versions of one candle as separate periods.
 
 Evaluation, signal, and economic-decision identities are derived deterministically from ATP canonical content. `NO_ACTION` is `COMPLETED` but has no `strategy_decision_id`. `LONG_ENTRY` and `EXIT` are economic proposals only; their decision identities are not order identities.
 

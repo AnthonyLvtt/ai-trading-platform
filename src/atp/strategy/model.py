@@ -32,6 +32,7 @@ class ReasonCode(StrEnum):
     SNAPSHOT_INCOMPATIBLE = "SNAPSHOT_INCOMPATIBLE"
     UNIVERSE_INCOMPATIBLE = "UNIVERSE_INCOMPATIBLE"
     INVALID_CLOSE = "INVALID_CLOSE"
+    NON_MONOTONIC_EVENT_TIME = "NON_MONOTONIC_EVENT_TIME"
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +103,9 @@ class SignalProvenance:
     dataset_id: DatasetId
     snapshot_id: SnapshotId
     snapshot_content_identity: ContentIdentity
+    schema_version: str
+    transformation_version: str
+    lineage_content_identity: ContentIdentity
     universe_snapshot_id: UniverseSnapshotId
     universe_content_identity: ContentIdentity
     evaluation_time: LogicalTime
@@ -111,6 +115,12 @@ class SignalProvenance:
     def __post_init__(self) -> None:
         if not self.strategy_version or self.strategy_version.strip() != self.strategy_version:
             raise ValidationError("strategy_version must be non-empty and trimmed")
+        for field_name, value in (
+            ("schema_version", self.schema_version),
+            ("transformation_version", self.transformation_version),
+        ):
+            if not value or value.strip() != value:
+                raise ValidationError(f"{field_name} must be non-empty and trimmed")
         if not self.symbol or self.symbol.strip() != self.symbol:
             raise ValidationError("Strategy provenance symbol must be non-empty and trimmed")
 
@@ -121,11 +131,14 @@ class SignalProvenance:
             "dataset_id": str(self.dataset_id),
             "environment": self.environment.value,
             "evaluation_time": self.evaluation_time.value.isoformat(),
+            "lineage_content_identity": str(self.lineage_content_identity),
+            "schema_version": self.schema_version,
             "snapshot_content_identity": str(self.snapshot_content_identity),
             "snapshot_id": str(self.snapshot_id),
             "strategy_id": str(self.strategy_id),
             "strategy_version": self.strategy_version,
             "symbol": self.symbol,
+            "transformation_version": self.transformation_version,
             "universe_content_identity": str(self.universe_content_identity),
             "universe_snapshot_id": str(self.universe_snapshot_id),
             "used_data": [point.canonical_value() for point in self.used_data],

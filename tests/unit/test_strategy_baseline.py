@@ -72,6 +72,9 @@ def snapshot(
     *,
     dataset_id: str = "btc-usdt-1m:v1",
     snapshot_id: str = "snapshot-strategy-1",
+    schema_version: str = "candle-v1",
+    transformation_version: str = "normalize-v1",
+    lineage_version: str = "v1",
     environment: Environment = Environment.BACKTEST,
     quality: DataQuality = DataQuality.VALID,
     freshness: FreshnessStatus = FreshnessStatus.FRESH,
@@ -89,8 +92,8 @@ def snapshot(
         snapshot_id=SnapshotId(snapshot_id),
         source_id=SourceId("historical-strategy-fixture"),
         environment=environment,
-        schema_version="candle-v1",
-        transformation_version="normalize-v1",
+        schema_version=schema_version,
+        transformation_version=transformation_version,
         created_at=T0 + timedelta(minutes=10),
         points=tuple(candle(close, index, finality=finality) for index, close in enumerate(closes))
         + extra_points,
@@ -99,7 +102,7 @@ def snapshot(
         gap_status=gap_status,
         gaps=gaps,
         degradation_reasons=frozenset(),
-        lineage=DataLineage((LineageStep("normalize", "v1"),)),
+        lineage=DataLineage((LineageStep("normalize", lineage_version),)),
     )
 
 
@@ -243,6 +246,31 @@ def test_configuration_change_changes_provenance() -> None:
     assert first.content_identity != second.content_identity
 
 
+@pytest.mark.parametrize(
+    "variant",
+    [
+        {"schema_version": "candle-v2"},
+        {"transformation_version": "normalize-v2"},
+        {"lineage_version": "v2"},
+    ],
+)
+def test_data_reproduction_metadata_changes_strategy_identity(
+    variant: dict[str, str],
+) -> None:
+    baseline_data = snapshot()
+    variant_data = snapshot(**variant)
+
+    baseline = strategy().evaluate(context(baseline_data))
+    changed = strategy().evaluate(context(variant_data))
+
+    assert baseline_data.content_identity == variant_data.content_identity
+    assert baseline.provenance.content_identity != changed.provenance.content_identity
+    assert baseline.strategy_evaluation_id != changed.strategy_evaluation_id
+    assert baseline.signal is not None
+    assert changed.signal is not None
+    assert baseline.signal.content_identity != changed.signal.content_identity
+
+
 def test_future_data_is_not_visible() -> None:
     evaluation_time = T0 + timedelta(minutes=3)
     future = candle("-100", 4, available_at=T0 + timedelta(minutes=4))
@@ -312,6 +340,18 @@ def test_invalid_close_is_blocked_without_substitution() -> None:
     assert result.status is EvaluationStatus.BLOCKED_INPUT
     assert result.reason_code is ReasonCode.INVALID_CLOSE
     assert result.signal is None
+
+
+def test_duplicate_event_time_is_blocked_without_silent_selection() -> None:
+    duplicate = candle("5", 3)
+    data = snapshot(extra_points=(duplicate,))
+
+    result = strategy().evaluate(context(data))
+
+    assert result.status is EvaluationStatus.BLOCKED_INPUT
+    assert result.reason_code is ReasonCode.NON_MONOTONIC_EVENT_TIME
+    assert result.signal is None
+    assert len(result.provenance.used_data) == strategy().configuration.long_window + 1
 
 
 def test_signal_identity_and_provenance_are_reproducible() -> None:

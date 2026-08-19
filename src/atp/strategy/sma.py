@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
 from typing import cast
 
 from atp.data.consumption import ConsumerContract, build_historical_view
@@ -73,6 +74,14 @@ class SmaCrossoverStrategy:
             )
 
         used_points = symbol_points[-minimum_history:]
+        if any(
+            previous.temporal.event_time >= current.temporal.event_time
+            for previous, current in pairwise(used_points)
+        ):
+            return StrategyEvaluation.blocked(
+                self._provenance(context, used_points),
+                ReasonCode.NON_MONOTONIC_EVENT_TIME,
+            )
         try:
             closes = tuple(_close(point) for point in used_points)
         except ValueError:
@@ -104,6 +113,9 @@ class SmaCrossoverStrategy:
             dataset_id=context.snapshot.dataset_id,
             snapshot_id=context.snapshot.snapshot_id,
             snapshot_content_identity=context.snapshot.content_identity,
+            schema_version=context.snapshot.schema_version,
+            transformation_version=context.snapshot.transformation_version,
+            lineage_content_identity=context.snapshot.lineage.content_identity,
             universe_snapshot_id=context.universe.universe_snapshot_id,
             universe_content_identity=context.universe.content_identity,
             evaluation_time=context.evaluation_time,
