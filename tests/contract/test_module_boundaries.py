@@ -37,11 +37,19 @@ STRATEGY_MODULES = [
     "atp.strategy.sma",
 ]
 
+RISK_MODULES = [
+    "atp.risk",
+    "atp.risk.engine",
+    "atp.risk.identity",
+    "atp.risk.model",
+    "atp.risk.policy",
+]
+
 MODULES = [
     *SHARED_MODULES,
     *DATA_MODULES,
     *STRATEGY_MODULES,
-    "atp.risk",
+    *RISK_MODULES,
     "atp.oms",
     "atp.accounting",
     "atp.backtesting",
