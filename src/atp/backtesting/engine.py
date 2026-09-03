@@ -28,7 +28,7 @@ from atp.data.snapshot import (
     FreshnessStatus,
     GapStatus,
 )
-from atp.risk.model import RiskProcessingResult, RiskStatus
+from atp.risk.model import RiskProcessingResult, RiskReasonCode, RiskStatus
 from atp.shared.identity import ContentIdentity
 from atp.strategy.model import EvaluationStatus, SignalKind, StrategyEvaluation
 
@@ -68,7 +68,10 @@ class BacktestInput:
 class DeterministicBacktestEngine:
     policy: SimulationPolicy
 
-    def replay(self, replay_input: BacktestInput) -> BacktestResult:
+    def replay(self, replay_input: object) -> BacktestResult:
+        if not _replay_input_structure_valid(replay_input):
+            return _blocked_runtime_result(replay_input, self.policy)
+        assert isinstance(replay_input, BacktestInput)
         if not _snapshot_admissible(replay_input.snapshot):
             return _blocked_input_result(
                 replay_input,
@@ -83,11 +86,24 @@ class DeterministicBacktestEngine:
             )
 
         state = replay_input.initial_state
+        state_effective_at = None
         results: list[ReplayStepResult] = []
         for step in replay_input.steps:
+            evaluation_time = step.evaluation_bar.temporal.event_time
+            if state_effective_at is not None and evaluation_time < state_effective_at:
+                results.append(
+                    _incompatible_step_result(
+                        step,
+                        state,
+                        BacktestReasonCode.CAUSAL_STATE_NOT_AVAILABLE,
+                    )
+                )
+                break
             result = self._process_step(replay_input.snapshot, step, state)
             results.append(result)
             state = result.position_after
+            if result.fill is not None:
+                state_effective_at = result.fill.fill_time
             if result.outcome is SimulatedOrderOutcome.BLOCKED or (
                 result.reason_code is BacktestReasonCode.RISK_BLOCKED
             ):
@@ -118,10 +134,9 @@ class DeterministicBacktestEngine:
         state: SimulatedPositionState,
     ) -> ReplayStepResult:
         if not _step_evidence_compatible(snapshot, step):
-            return _step_result(
+            return _incompatible_step_result(
                 step,
                 state,
-                SimulatedOrderOutcome.BLOCKED,
                 BacktestReasonCode.RISK_EVIDENCE_INCOMPATIBLE,
             )
 
@@ -215,18 +230,51 @@ class DeterministicBacktestEngine:
         )
 
 
-def _snapshot_admissible(snapshot: DatasetSnapshot) -> bool:
-    if (
-        snapshot.quality is not DataQuality.VALID
-        or snapshot.validation_as_of_use is not DataQuality.VALID
-        or snapshot.freshness is not FreshnessStatus.FRESH
-        or snapshot.gap_status is not GapStatus.NO_GAP_DETECTED
-        or snapshot.gaps
-    ):
+def _replay_input_structure_valid(replay_input: object) -> bool:
+    if not isinstance(replay_input, BacktestInput):
+        return False
+    try:
+        if (
+            not isinstance(replay_input.snapshot, DatasetSnapshot)
+            or not isinstance(replay_input.steps, tuple)
+            or not all(isinstance(step, ReplayStep) for step in replay_input.steps)
+            or not _position_state_valid(replay_input.initial_state)
+        ):
+            return False
+        replace(replay_input.initial_state)
+    except Exception:
+        return False
+    return True
+
+
+def _position_state_valid(state: object) -> bool:
+    return isinstance(state, SimulatedPositionState) and (
+        (state.status is SimulatedPositionStatus.EMPTY and state.symbol is None)
+        or (
+            state.status is SimulatedPositionStatus.OPEN_LONG
+            and isinstance(state.symbol, str)
+            and bool(state.symbol)
+            and state.symbol.strip() == state.symbol
+        )
+    )
+
+
+def _snapshot_admissible(snapshot: object) -> bool:
+    if not isinstance(snapshot, DatasetSnapshot):
         return False
     try:
         replace(snapshot.lineage)
         replace(snapshot)
+        if (
+            snapshot.quality is not DataQuality.VALID
+            or snapshot.validation_as_of_use is not DataQuality.VALID
+            or snapshot.freshness is not FreshnessStatus.FRESH
+            or snapshot.gap_status is not GapStatus.NO_GAP_DETECTED
+            or snapshot.gaps
+            or not isinstance(snapshot.points, tuple)
+            or not all(isinstance(point, DataPoint) for point in snapshot.points)
+        ):
+            return False
     except Exception:
         return False
     symbols = {point.symbol for point in snapshot.points}
@@ -243,13 +291,22 @@ def _snapshot_admissible(snapshot: DatasetSnapshot) -> bool:
 
 def _steps_strictly_ordered(steps: tuple[ReplayStep, ...]) -> bool:
     try:
+        if not isinstance(steps, tuple) or not all(isinstance(step, ReplayStep) for step in steps):
+            return False
         times = tuple(step.evaluation_bar.temporal.event_time for step in steps)
-    except AttributeError:
+    except Exception:
         return False
     return all(previous < current for previous, current in pairwise(times))
 
 
 def _step_evidence_compatible(snapshot: DatasetSnapshot, step: ReplayStep) -> bool:
+    try:
+        return _step_evidence_compatible_checked(snapshot, step)
+    except Exception:
+        return False
+
+
+def _step_evidence_compatible_checked(snapshot: DatasetSnapshot, step: ReplayStep) -> bool:
     evaluation = step.strategy_evaluation
     risk = step.risk_result
     bar = step.evaluation_bar
@@ -404,6 +461,35 @@ def _step_result(
     )
 
 
+def _incompatible_step_result(
+    step: ReplayStep,
+    before: SimulatedPositionState,
+    reason_code: BacktestReasonCode,
+) -> ReplayStepResult:
+    raw_risk = step.risk_result
+    risk_status = (
+        raw_risk.status
+        if isinstance(raw_risk, RiskProcessingResult) and isinstance(raw_risk.status, RiskStatus)
+        else RiskStatus.BLOCKED
+    )
+    risk_reason = (
+        raw_risk.reason_code
+        if isinstance(raw_risk, RiskProcessingResult)
+        and isinstance(raw_risk.reason_code, RiskReasonCode)
+        else RiskReasonCode.STRATEGY_INPUT_NOT_REPRODUCIBLE
+    )
+    return ReplayStepResult(
+        outcome=SimulatedOrderOutcome.BLOCKED,
+        reason_code=reason_code,
+        risk_status=risk_status,
+        risk_reason_code=risk_reason,
+        order=None,
+        fill=None,
+        position_before=before,
+        position_after=before,
+    )
+
+
 def _blocked_input_result(
     replay_input: BacktestInput,
     policy: SimulationPolicy,
@@ -412,8 +498,67 @@ def _blocked_input_result(
     return BacktestResult.create(
         status=BacktestStatus.BLOCKED,
         reason_code=reason_code,
-        input_identity=replay_input.content_identity,
+        input_identity=_safe_input_identity(replay_input),
         simulation_policy_identity=policy.content_identity,
         steps=(),
         terminal_state=replay_input.initial_state,
+    )
+
+
+def _blocked_runtime_result(
+    replay_input: object,
+    policy: SimulationPolicy,
+) -> BacktestResult:
+    return BacktestResult.create(
+        status=BacktestStatus.BLOCKED,
+        reason_code=BacktestReasonCode.INVALID_REPLAY_INPUT,
+        input_identity=_safe_input_identity(replay_input),
+        simulation_policy_identity=policy.content_identity,
+        steps=(),
+        terminal_state=_safe_initial_state(replay_input),
+    )
+
+
+def _safe_initial_state(replay_input: object) -> SimulatedPositionState:
+    if isinstance(replay_input, BacktestInput) and _position_state_valid(
+        replay_input.initial_state
+    ):
+        return replay_input.initial_state
+    return SimulatedPositionState.empty()
+
+
+def _safe_input_identity(replay_input: object) -> ContentIdentity:
+    if (
+        isinstance(replay_input, BacktestInput)
+        and isinstance(replay_input.snapshot, DatasetSnapshot)
+        and isinstance(replay_input.snapshot.content_identity, ContentIdentity)
+        and isinstance(replay_input.steps, tuple)
+        and _position_state_valid(replay_input.initial_state)
+        and all(_step_identity_components_valid(step) for step in replay_input.steps)
+    ):
+        return ContentIdentity.from_canonical(
+            {
+                "initial_state": replay_input.initial_state.canonical_value(),
+                "snapshot_identity": str(replay_input.snapshot.content_identity),
+                "steps": [step.canonical_value() for step in replay_input.steps],
+            }
+        )
+    value_type = type(replay_input)
+    return ContentIdentity.from_canonical(
+        {
+            "invalid_backtest_input": True,
+            "invalid_type": f"{value_type.__module__}.{value_type.__qualname__}",
+        }
+    )
+
+
+def _step_identity_components_valid(step: object) -> bool:
+    return (
+        isinstance(step, ReplayStep)
+        and isinstance(step.strategy_evaluation, StrategyEvaluation)
+        and isinstance(step.strategy_evaluation.content_identity, ContentIdentity)
+        and isinstance(step.risk_result, RiskProcessingResult)
+        and isinstance(step.risk_result.content_identity, ContentIdentity)
+        and isinstance(step.evaluation_bar, DataPoint)
+        and isinstance(step.evaluation_bar.content_identity, ContentIdentity)
     )

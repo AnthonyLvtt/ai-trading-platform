@@ -10,6 +10,8 @@ Each replay step binds one reproducible Strategy evaluation and its Risk process
 
 The engine selects exactly the first later bar of the same symbol. It never searches beyond an inadmissible candidate. The fill price is exclusively `open(T+1)`. The simulated fill time is the candidate bar's `available_at`, so no fill predates historical availability. Strategy evaluation time and order creation time equal the evaluation bar event time.
 
+The replay tracks when the latest filled state becomes causally effective. If a following Strategy/Risk evaluation predates that fill time, replay blocks with `CAUSAL_STATE_NOT_AVAILABLE`; it neither exposes the future state to economic processing nor creates another order. V1 deliberately fails closed instead of inventing an event scheduler.
+
 ## DATA admissibility
 
 V1 accepts only a historically valid, fresh snapshot with `NO_GAP_DETECTED`, final points, consistent immutable provenance, and strictly increasing unique event times per symbol. The evaluation bar must be the final Strategy-used point and must have been available at evaluation time. The next bar must be final, later, symbol-compatible, reproducible, and contain a finite positive open.
@@ -33,3 +35,5 @@ The original typed Risk status and reason code remain in each step result. A non
 ## Boundaries
 
 Backtesting imports accepted DATA, Strategy, Risk, and Shared contracts only. Contract tests prohibit OMS, Exchange, and Accounting imports. There is no network, persistence infrastructure, AI/ML, Testnet, or Live path.
+
+The public `replay()` boundary validates the input container, snapshot, immutable step collection, evaluation bars, and initial simulated state before dereferencing them. Malformed runtime evidence returns a deterministic blocked result with a safe type-based identity when the canonical input identity cannot be established. Unknown objects are never stringified for this fallback identity.

@@ -67,6 +67,7 @@ def snapshot(
     *,
     finalities: dict[int, DataFinality] | None = None,
     payloads: dict[int, dict[str, object]] | None = None,
+    available_at: dict[int, datetime] | None = None,
 ) -> DatasetSnapshot:
     closes = ("3", "2", "1", "4", "5", "0", "1")
     opens = ("3", "3", "2", "1", "4.5", "5.5", "0.5")
@@ -78,7 +79,10 @@ def snapshot(
                 event_time=START + timedelta(minutes=index),
                 provider_time=START + timedelta(minutes=index),
                 ingested_at=START + timedelta(minutes=index),
-                available_at=START + timedelta(minutes=index),
+                available_at=(available_at or {}).get(
+                    index,
+                    START + timedelta(minutes=index),
+                ),
             ),
             finality=(finalities or {}).get(index, DataFinality.FINAL),
         )
@@ -217,6 +221,23 @@ def test_exit_fills_next_bar_and_returns_to_empty() -> None:
     assert result.terminal_simulated_position_state == SimulatedPositionState.empty()
 
 
+def test_delayed_fill_state_cannot_leak_into_earlier_following_evaluation() -> None:
+    data = snapshot(available_at={4: START + timedelta(minutes=10)})
+    entry = replay_step(data, 3, empty_portfolio())
+    following = replay_step(data, 5, empty_portfolio())
+
+    result = replay(data, entry, following)
+
+    assert result.steps[0].fill is not None
+    assert result.steps[0].fill.fill_time == START + timedelta(minutes=10)
+    assert following.evaluation_bar.temporal.event_time == START + timedelta(minutes=5)
+    assert result.status is BacktestStatus.BLOCKED
+    assert result.reason_code is BacktestReasonCode.CAUSAL_STATE_NOT_AVAILABLE
+    assert result.steps[1].outcome is SimulatedOrderOutcome.BLOCKED
+    assert result.steps[1].order is None
+    assert result.steps[1].fill is None
+
+
 def test_no_action_and_non_approved_risk_never_create_orders() -> None:
     data = snapshot()
     no_action = replay_step(data, 4, open_portfolio())
@@ -351,6 +372,67 @@ def test_tampered_risk_linkage_blocks_without_order() -> None:
     assert result.status is BacktestStatus.BLOCKED
     assert result.steps[0].reason_code is BacktestReasonCode.RISK_EVIDENCE_INCOMPATIBLE
     assert result.steps[0].order is None
+
+
+def test_malformed_top_level_replay_input_is_blocked_deterministically() -> None:
+    engine = DeterministicBacktestEngine(SimulationPolicy.v1())
+
+    first = engine.replay("invalid-input")
+    second = engine.replay("invalid-input")
+
+    assert first == second
+    assert first.status is BacktestStatus.BLOCKED
+    assert first.reason_code is BacktestReasonCode.INVALID_REPLAY_INPUT
+    assert first.steps == ()
+
+
+@pytest.mark.parametrize("field", ["snapshot", "steps", "initial_state"])
+def test_malformed_backtest_input_fields_are_blocked(field: str) -> None:
+    data = snapshot()
+    values: dict[str, object] = {
+        "snapshot": data,
+        "steps": (replay_step(data, 3, empty_portfolio()),),
+        "initial_state": SimulatedPositionState.empty(),
+    }
+    replacements: dict[str, object] = {
+        "snapshot": {"points": []},
+        "steps": [values["steps"]],
+        "initial_state": "EMPTY",
+    }
+    values[field] = replacements[field]
+    malformed = BacktestInput(**values)  # type: ignore[arg-type]
+
+    result = DeterministicBacktestEngine(SimulationPolicy.v1()).replay(malformed)
+
+    assert result.status is BacktestStatus.BLOCKED
+    assert result.reason_code is BacktestReasonCode.INVALID_REPLAY_INPUT
+    assert result.number_of_orders == result.number_of_fills == 0
+
+
+def test_malformed_evaluation_bar_is_blocked_without_exception() -> None:
+    data = snapshot()
+    step = replay_step(data, 3, empty_portfolio())
+    object.__setattr__(step, "evaluation_bar", {"event_time": START})
+
+    result = replay(data, step)
+
+    assert result.status is BacktestStatus.BLOCKED
+    assert result.reason_code is BacktestReasonCode.EVALUATION_BAR_INADMISSIBLE
+    assert result.steps == ()
+
+
+def test_corrupted_snapshot_and_position_state_are_blocked() -> None:
+    data = snapshot()
+    object.__setattr__(data, "points", [*data.points])
+    invalid_state = SimulatedPositionState.empty()
+    object.__setattr__(invalid_state, "status", "EMPTY")
+    malformed = BacktestInput(data, (), invalid_state)
+
+    result = DeterministicBacktestEngine(SimulationPolicy.v1()).replay(malformed)
+
+    assert result.status is BacktestStatus.BLOCKED
+    assert result.reason_code is BacktestReasonCode.INVALID_REPLAY_INPUT
+    assert result.terminal_simulated_position_state == SimulatedPositionState.empty()
 
 
 def test_result_is_structural_without_quantity_or_financial_metrics() -> None:
