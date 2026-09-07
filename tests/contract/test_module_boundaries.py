@@ -61,6 +61,14 @@ ACCOUNTING_MODULES = [
     "atp.accounting.policy",
 ]
 
+OBSERVABILITY_MODULES = [
+    "atp.observability",
+    "atp.observability.adapters",
+    "atp.observability.audit",
+    "atp.observability.events",
+    "atp.observability.logging",
+]
+
 MODULES = [
     *SHARED_MODULES,
     *DATA_MODULES,
@@ -68,8 +76,8 @@ MODULES = [
     *RISK_MODULES,
     *BACKTESTING_MODULES,
     *ACCOUNTING_MODULES,
+    *OBSERVABILITY_MODULES,
     "atp.oms",
-    "atp.observability",
     "atp.test_qualification",
     "atp.ops",
     "atp.web",
