@@ -53,14 +53,22 @@ BACKTESTING_MODULES = [
     "atp.backtesting.policy",
 ]
 
+ACCOUNTING_MODULES = [
+    "atp.accounting",
+    "atp.accounting.engine",
+    "atp.accounting.identity",
+    "atp.accounting.model",
+    "atp.accounting.policy",
+]
+
 MODULES = [
     *SHARED_MODULES,
     *DATA_MODULES,
     *STRATEGY_MODULES,
     *RISK_MODULES,
     *BACKTESTING_MODULES,
+    *ACCOUNTING_MODULES,
     "atp.oms",
-    "atp.accounting",
     "atp.observability",
     "atp.test_qualification",
     "atp.ops",
