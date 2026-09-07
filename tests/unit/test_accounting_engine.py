@@ -16,8 +16,10 @@ from atp.accounting import (
     AccountingReplayInput,
     AccountingStatus,
 )
+from atp.accounting.identity import AccountingPolicyId
 from atp.backtesting.identity import SimulatedFillId
 from atp.backtesting.model import SimulatedFill
+from atp.shared.errors import ValidationError
 from atp.shared.identity import ContentIdentity
 from tests.unit.test_backtesting_engine import (
     empty_portfolio,
@@ -386,12 +388,37 @@ def test_malformed_replay_result_and_state_fail_closed_during_valuation() -> Non
     assert second.status is AccountingStatus.BLOCKED
 
 
-def test_policy_identity_changes_replay_identity() -> None:
-    entry, _ = fills()
-    value = accounting_input(AccountingExecution(entry, Decimal("2")))
-    first = AccountingEngine().replay(value)
-    different_policy = replace(ACCOUNTING_POLICY_V1, version="1.1")
-    second = AccountingEngine(different_policy).replay(value)
+def test_well_typed_tampered_replay_state_fails_closed_during_valuation() -> None:
+    valid = AccountingEngine().replay(accounting_input())
+    tampered_state = replace(valid.final_state, cash=Decimal("101"))
+    object.__setattr__(valid, "final_state", tampered_state)
 
-    assert first.content_identity != second.content_identity
-    assert first.accounting_policy_identity != second.accounting_policy_identity
+    valuation = AccountingEngine().value(
+        replay_result=valid,
+        mark=None,
+        valuation_time=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    assert valuation.status is AccountingStatus.BLOCKED
+    assert valuation.reason_code is AccountingReasonCode.INVALID_ACCOUNTING_INPUT
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("policy_id", AccountingPolicyId("ATP_ACCOUNTING_V2")),
+        ("version", "1.1"),
+        ("currency", "EUR"),
+    ],
+)
+def test_non_normative_accounting_policy_is_rejected(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        replace(ACCOUNTING_POLICY_V1, **{field: value})
+
+
+def test_engine_rejects_policy_mutated_after_construction() -> None:
+    policy = replace(ACCOUNTING_POLICY_V1)
+    object.__setattr__(policy, "currency", "EUR")
+
+    with pytest.raises(ValidationError):
+        AccountingEngine(policy)

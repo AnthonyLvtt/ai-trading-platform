@@ -20,6 +20,8 @@ The CTO decision `ENG-ACC-001 V1 SIMULATED ACCOUNTING POLICY` is the normative s
 - Decimal-only economic arithmetic;
 - DATA `close` as the explicit valuation mark.
 
+The policy identifier, version, and currency are locked normative constants. Construction or engine use of a mutated/non-V1 policy is rejected before any accounting operation.
+
 ## Economic transitions
 
 `BUY_ENTRY` debits `fill_price * quantity`, requires sufficient cash and opens one long position. `SELL_EXIT` requires the same symbol and exact open quantity, credits proceeds, realizes `(exit_price - entry_price) * quantity`, and returns the position to `EMPTY`.
@@ -37,6 +39,8 @@ equity = initial_cash + realized_pnl + unrealized_pnl
 ```
 
 An empty state needs no mark and has zero unrealized PnL.
+
+Before valuation, the engine recomputes the replay identity and identifier and verifies the ledger chain, policy provenance, unique causal fills, cash/PnL deltas, and terminal state identity. A well-typed but altered economic result is therefore blocked rather than valued.
 
 ## Boundaries and deferred scope
 

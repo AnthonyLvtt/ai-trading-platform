@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TypeGuard
 
+from atp.accounting.identity import AccountingEntryId, AccountingPolicyId, AccountingReplayId
 from atp.accounting.model import (
     AccountingEntry,
     AccountingEntryProvenance,
@@ -30,6 +31,7 @@ from atp.data.identity import DatasetId, SnapshotId
 from atp.data.snapshot import DataFinality, DataQuality, GapStatus
 from atp.risk.identity import RiskDecisionId
 from atp.risk.model import RiskReasonCode, RiskStatus
+from atp.shared.errors import ValidationError
 from atp.shared.identity import ContentIdentity
 from atp.strategy.identity import StrategyDecisionId, StrategyEvaluationId
 
@@ -38,6 +40,9 @@ _FALLBACK_TIME = datetime(1970, 1, 1, tzinfo=UTC)
 
 class AccountingEngine:
     def __init__(self, policy: AccountingPolicy = ACCOUNTING_POLICY_V1) -> None:
+        if not isinstance(policy, AccountingPolicy):
+            raise ValidationError("Accounting engine requires the normative V1 policy")
+        policy.require_v1()
         self.policy = policy
 
     def replay(self, replay_input: object) -> AccountingReplayResult:
@@ -183,7 +188,7 @@ class AccountingEngine:
     def value(
         self, *, replay_result: object, mark: object | None, valuation_time: object
     ) -> AccountingValuation:
-        if _valid_replay_result(replay_result):
+        if _valid_replay_result(replay_result, self.policy):
             valid_result: AccountingReplayResult | None = replay_result
             state = replay_result.final_state
         else:
@@ -416,14 +421,19 @@ def _safe_initial_cash(value: object) -> Decimal:
     return cash if isinstance(cash, Decimal) and cash.is_finite() and cash >= 0 else Decimal("0")
 
 
-def _valid_replay_result(value: object) -> TypeGuard[AccountingReplayResult]:
+def _valid_replay_result(
+    value: object, policy: AccountingPolicy
+) -> TypeGuard[AccountingReplayResult]:
     if not isinstance(value, AccountingReplayResult):
         return False
     state = value.final_state
     if (
         not isinstance(value.status, AccountingStatus)
+        or not isinstance(value.reason_code, AccountingReasonCode | None)
+        or not isinstance(value.accounting_replay_id, AccountingReplayId)
         or not isinstance(value.input_identity, ContentIdentity)
         or not isinstance(value.accounting_policy_identity, ContentIdentity)
+        or value.accounting_policy_identity != policy.content_identity
         or not isinstance(value.initial_cash, Decimal)
         or not value.initial_cash.is_finite()
         or value.initial_cash < 0
@@ -435,27 +445,155 @@ def _valid_replay_result(value: object) -> TypeGuard[AccountingReplayResult]:
         or not isinstance(state.cumulative_realized_pnl, Decimal)
         or not state.cumulative_realized_pnl.is_finite()
         or not isinstance(state.position, AccountingPosition)
+        or not isinstance(value.ledger, tuple)
+        or not isinstance(value.content_identity, ContentIdentity)
         or (state.last_effective_at is not None and not _aware_datetime(state.last_effective_at))
     ):
+        return False
+    if (value.status is AccountingStatus.COMPLETED) != (value.reason_code is None):
         return False
     position = state.position
     if not isinstance(position.status, AccountingPositionStatus):
         return False
     if position.status is AccountingPositionStatus.EMPTY:
-        return (
+        position_valid = (
             position.symbol is None
             and position.quantity is None
             and position.average_entry_price is None
         )
-    return (
-        isinstance(position.symbol, str)
-        and bool(position.symbol)
-        and isinstance(position.quantity, Decimal)
-        and position.quantity.is_finite()
-        and position.quantity > 0
-        and isinstance(position.average_entry_price, Decimal)
-        and position.average_entry_price.is_finite()
-        and position.average_entry_price > 0
+    else:
+        position_valid = (
+            isinstance(position.symbol, str)
+            and bool(position.symbol)
+            and isinstance(position.quantity, Decimal)
+            and position.quantity.is_finite()
+            and position.quantity > 0
+            and isinstance(position.average_entry_price, Decimal)
+            and position.average_entry_price.is_finite()
+            and position.average_entry_price > 0
+        )
+    if not position_valid or not _ledger_matches_result(value, policy):
+        return False
+    canonical = {
+        "accounting_policy_identity": str(value.accounting_policy_identity),
+        "final_state": state.canonical_value(),
+        "initial_cash": str(value.initial_cash),
+        "input_identity": str(value.input_identity),
+        "ledger": [str(entry.content_identity) for entry in value.ledger],
+        "reason_code": None if value.reason_code is None else value.reason_code.value,
+        "status": value.status.value,
+    }
+    expected = ContentIdentity.from_canonical(canonical)
+    return value.content_identity == expected and value.accounting_replay_id == AccountingReplayId(
+        f"accounting-replay:{expected}"
+    )
+
+
+def _ledger_matches_result(value: AccountingReplayResult, policy: AccountingPolicy) -> bool:
+    state = AccountingState.initial(value.initial_cash)
+    seen_fill_ids: set[str] = set()
+    for entry in value.ledger:
+        if not _valid_entry(entry, policy):
+            return False
+        provenance = entry.provenance
+        if (
+            provenance.previous_accounting_state_identity != state.content_identity
+            or provenance.simulated_fill_id in seen_fill_ids
+            or (
+                state.last_effective_at is not None
+                and provenance.fill_time <= state.last_effective_at
+            )
+        ):
+            return False
+        seen_fill_ids.add(provenance.simulated_fill_id)
+        if provenance.side is SimulatedOrderSide.BUY_ENTRY:
+            if state.position.status is not AccountingPositionStatus.EMPTY:
+                return False
+            expected_cash_delta = -(provenance.fill_price * provenance.quantity)
+            expected_pnl_delta = Decimal("0")
+            next_position = AccountingPosition.open_long(
+                symbol=provenance.symbol,
+                quantity=provenance.quantity,
+                average_entry_price=provenance.fill_price,
+            )
+        else:
+            position = state.position
+            if (
+                position.status is not AccountingPositionStatus.OPEN_LONG
+                or position.symbol != provenance.symbol
+                or position.quantity != provenance.quantity
+                or position.average_entry_price is None
+            ):
+                return False
+            expected_cash_delta = provenance.fill_price * provenance.quantity
+            expected_pnl_delta = (
+                provenance.fill_price - position.average_entry_price
+            ) * provenance.quantity
+            next_position = AccountingPosition.empty()
+        if (
+            entry.cash_delta != expected_cash_delta
+            or entry.realized_pnl_delta != expected_pnl_delta
+            or state.cash + expected_cash_delta < 0
+        ):
+            return False
+        state = AccountingState(
+            currency="USDT",
+            cash=state.cash + expected_cash_delta,
+            position=next_position,
+            cumulative_realized_pnl=state.cumulative_realized_pnl + expected_pnl_delta,
+            last_effective_at=provenance.fill_time,
+        )
+        if provenance.resulting_accounting_state_identity != state.content_identity:
+            return False
+    return state == value.final_state
+
+
+def _valid_entry(entry: object, policy: AccountingPolicy) -> TypeGuard[AccountingEntry]:
+    if not isinstance(entry, AccountingEntry) or not isinstance(
+        entry.provenance, AccountingEntryProvenance
+    ):
+        return False
+    provenance = entry.provenance
+    if (
+        not isinstance(entry.accounting_entry_id, AccountingEntryId)
+        or not isinstance(entry.cash_delta, Decimal)
+        or not entry.cash_delta.is_finite()
+        or not isinstance(entry.realized_pnl_delta, Decimal)
+        or not entry.realized_pnl_delta.is_finite()
+        or not isinstance(entry.content_identity, ContentIdentity)
+        or not isinstance(provenance.simulated_fill_id, str)
+        or not provenance.simulated_fill_id
+        or not isinstance(provenance.simulated_fill_identity, ContentIdentity)
+        or not isinstance(provenance.simulated_order_id, str)
+        or not provenance.simulated_order_id
+        or not isinstance(provenance.fill_provenance_identity, ContentIdentity)
+        or not isinstance(provenance.symbol, str)
+        or not provenance.symbol
+        or not isinstance(provenance.side, SimulatedOrderSide)
+        or not isinstance(provenance.quantity, Decimal)
+        or not provenance.quantity.is_finite()
+        or provenance.quantity <= 0
+        or not isinstance(provenance.fill_price, Decimal)
+        or not provenance.fill_price.is_finite()
+        or provenance.fill_price <= 0
+        or not _aware_datetime(provenance.fill_time)
+        or not isinstance(provenance.accounting_policy_id, AccountingPolicyId)
+        or provenance.accounting_policy_id != policy.policy_id
+        or provenance.accounting_policy_version != policy.version
+        or provenance.accounting_policy_identity != policy.content_identity
+        or not isinstance(provenance.previous_accounting_state_identity, ContentIdentity)
+        or not isinstance(provenance.resulting_accounting_state_identity, ContentIdentity)
+    ):
+        return False
+    expected = ContentIdentity.from_canonical(
+        {
+            "cash_delta": str(entry.cash_delta),
+            "provenance": provenance.canonical_value(),
+            "realized_pnl_delta": str(entry.realized_pnl_delta),
+        }
+    )
+    return entry.content_identity == expected and entry.accounting_entry_id == AccountingEntryId(
+        f"accounting-entry:{expected}"
     )
 
 
