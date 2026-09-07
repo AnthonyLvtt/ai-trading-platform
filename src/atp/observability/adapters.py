@@ -218,10 +218,13 @@ def observe_backtest(
         replay_input.steps
     ):
         return invalid_event_result(result)
+    occurred_at = _backtest_occurred_at(result, replay_input)
+    if occurred_at is None:
+        return invalid_event_result(result)
     completed = result.status is BacktestStatus.COMPLETED
     return _build(
         event_type=EventType.BACKTEST_COMPLETED if completed else EventType.BACKTEST_BLOCKED,
-        occurred_at=_backtest_occurred_at(result, replay_input),
+        occurred_at=occurred_at,
         environment=replay_input.snapshot.environment,
         module=EventModule.BACKTESTING,
         category=EventCategory.DOMAIN if completed else EventCategory.CONTROL,
@@ -417,18 +420,17 @@ def _valid_backtest_input(value: object) -> bool:
         return False
 
 
-def _backtest_occurred_at(result: BacktestResult, replay_input: BacktestInput) -> datetime:
-    times = [replay_input.snapshot.created_at]
-    times.extend(
+def _backtest_occurred_at(result: BacktestResult, replay_input: BacktestInput) -> datetime | None:
+    times = [
         step.strategy_evaluation.provenance.evaluation_time.value
         for step in replay_input.steps[: len(result.steps)]
-    )
+    ]
     for step in result.steps:
         if step.order is not None:
             times.append(step.order.created_at)
         if step.fill is not None:
             times.append(step.fill.fill_time)
-    return max(times)
+    return None if not times else max(times)
 
 
 def _valid_accounting_input(value: object) -> bool:

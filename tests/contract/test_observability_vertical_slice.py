@@ -8,6 +8,7 @@ from pathlib import Path
 from atp.accounting import AccountingEngine, AccountingExecution, AccountingReplayInput
 from atp.backtesting import (
     BacktestInput,
+    BacktestResult,
     DeterministicBacktestEngine,
     ReplayStep,
     SimulatedPositionState,
@@ -65,6 +66,92 @@ from atp.strategy import (
     StrategyEvaluationContext,
     StrategyId,
 )
+
+
+def _completed_backtest(
+    *, snapshot_created_at: datetime
+) -> tuple[DatasetSnapshot, BacktestInput, BacktestResult]:
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    points = tuple(
+        DataPoint.from_value(
+            symbol="BTCUSDT",
+            value={"close": close, "open": open_price},
+            temporal=TemporalMetadata(
+                event_time=start + timedelta(minutes=index),
+                provider_time=start + timedelta(minutes=index),
+                ingested_at=start + timedelta(minutes=index),
+                available_at=start + timedelta(minutes=index),
+            ),
+            finality=DataFinality.FINAL,
+        )
+        for index, (close, open_price) in enumerate(
+            (("3", "3"), ("2", "3"), ("1", "2"), ("4", "1"), ("5", "4.5"))
+        )
+    )
+    snapshot = DatasetSnapshot.create(
+        dataset_id=DatasetId("btc-usdt-1m:v1"),
+        snapshot_id=SnapshotId("snapshot:late-created-observability:v1"),
+        source_id=SourceId("historical-observability-fixture"),
+        environment=Environment.BACKTEST,
+        schema_version="candle-v1",
+        transformation_version="normalize-v1",
+        created_at=snapshot_created_at,
+        points=points,
+        quality=DataQuality.VALID,
+        freshness=FreshnessStatus.FRESH,
+        gap_status=GapStatus.NO_GAP_DETECTED,
+        gaps=(),
+        degradation_reasons=frozenset(),
+        lineage=DataLineage((LineageStep("normalize", "v1"),)),
+    )
+    universe = UniverseSnapshot.create(
+        universe_snapshot_id=UniverseSnapshotId("universe:late-created-observability:v1"),
+        created_at=start,
+        effective_at=start,
+        rules_version="spot-usdt-v1",
+        source_snapshot_ids=(snapshot.snapshot_id,),
+        decisions=(SymbolDecision("BTCUSDT", True, "eligible fixture", start),),
+    )
+    strategy = SmaCrossoverStrategy(
+        strategy_id=StrategyId("sma-crossover"),
+        version="1.0.0",
+        configuration=SmaCrossoverConfig(short_window=2, long_window=3),
+    ).evaluate(
+        StrategyEvaluationContext(
+            environment=Environment.BACKTEST,
+            snapshot=snapshot,
+            universe=universe,
+            evaluation_time=LogicalTime(start + timedelta(minutes=3)),
+            symbol="BTCUSDT",
+        )
+    )
+    risk = DeterministicRiskEngine(
+        RiskPolicy.v1(policy_id=RiskPolicyId("risk-v1"), version="1.0.0")
+    ).evaluate(
+        RiskEvaluationContext(
+            strategy_evaluation=strategy,
+            market_context=RiskMarketContext(
+                symbol="BTCUSDT",
+                market_type=MarketType.SPOT,
+                position_direction=PositionDirection.LONG,
+                margin_enabled=False,
+                leverage=Decimal(1),
+                instrument_class=InstrumentClass.SPOT,
+                environment=Environment.BACKTEST.value,
+            ),
+            portfolio_state=PortfolioState.create(PortfolioKnowledgeStatus.KNOWN_EMPTY),
+        )
+    )
+    replay_input = BacktestInput(
+        snapshot=snapshot,
+        steps=(ReplayStep(strategy, risk, points[3]),),
+        initial_state=SimulatedPositionState.empty(),
+    )
+    return (
+        snapshot,
+        replay_input,
+        DeterministicBacktestEngine(SimulationPolicy.v1()).replay(replay_input),
+    )
 
 
 def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
@@ -254,6 +341,44 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
     )
     assert forged_time.status is ObservabilityStatus.BLOCKED
     assert forged_time.event is None
+
+
+def test_backtest_event_ignores_late_snapshot_creation_time() -> None:
+    snapshot, replay_input, backtest = _completed_backtest(
+        snapshot_created_at=datetime(2026, 9, 1, 12, tzinfo=UTC)
+    )
+    fill = backtest.steps[0].fill
+    assert fill is not None
+
+    observed = observe_backtest(
+        backtest,
+        replay_input=replay_input,
+        context=ObservationContext(CorrelationId(f"correlation:{backtest.content_identity}")),
+    )
+
+    assert observed.status is ObservabilityStatus.ACCEPTED
+    assert observed.event is not None
+    assert observed.event.occurred_at == fill.fill_time
+    assert observed.event.occurred_at < snapshot.created_at
+
+
+def test_empty_backtest_without_causal_time_is_blocked() -> None:
+    snapshot, _, _ = _completed_backtest(snapshot_created_at=datetime(2026, 9, 1, 12, tzinfo=UTC))
+    replay_input = BacktestInput(
+        snapshot=snapshot,
+        steps=(),
+        initial_state=SimulatedPositionState.empty(),
+    )
+    backtest = DeterministicBacktestEngine(SimulationPolicy.v1()).replay(replay_input)
+
+    observed = observe_backtest(
+        backtest,
+        replay_input=replay_input,
+        context=ObservationContext(CorrelationId(f"correlation:{backtest.content_identity}")),
+    )
+
+    assert observed.status is ObservabilityStatus.BLOCKED
+    assert observed.event is None
 
 
 def test_observability_has_no_forbidden_authority_or_infrastructure_imports() -> None:
