@@ -8,7 +8,7 @@ The CTO decision `ENG-OBS-001 V1 OBSERVABILITY / AUDIT POLICY` is the normative 
 
 `ObservabilityEvent` is a structured, deterministic and auditable domain reference. `DiagnosticLogRecord` is a human-facing operational representation. A log may reference an event but cannot replace an audit event or authorize a business action.
 
-Events never contain exceptions, tracebacks, complete domain objects or arbitrary Python values. Logs can redact diagnostic content, while a sensitive event payload is blocked rather than made acceptable through redaction.
+Events never contain exceptions, tracebacks, complete domain objects or arbitrary Python values. Logs can redact diagnostic content, while a sensitive event payload is blocked rather than made acceptable through redaction. Each event contract validates both its exact field set and the V1 types, enum values and status/reason relationships before canonicalization.
 
 ## Event contract and taxonomy
 
@@ -40,7 +40,7 @@ The JSON diagnostic logger also redacts sensitive keys and configured secret val
 
 ## Domain adapters
 
-Read-only adapters map DATA snapshots, Strategy evaluations, Risk processing results, simulated orders/fills, Backtest results, Accounting entries/replays and valuations to the closed event taxonomy. They revalidate domain artefact identity before producing an event and accept explicit logical time or environment where the source artefact does not carry it.
+Read-only adapters map DATA snapshots, Strategy evaluations, Risk processing results, simulated orders/fills, Backtest results, Accounting entries/replays and valuations to the closed event taxonomy. They revalidate domain artefact identity before producing an event. Event time is derived from domain evidence: snapshot creation, Strategy evaluation, order creation, fill availability, ledger effect or valuation time. Risk requires its matching Strategy evaluation; Backtest requires its matching replay input; Accounting replay requires its matching Accounting input. A caller cannot supply or override these logical timestamps.
 
 The vertical-slice contract test executes the existing DATA → Strategy → Risk → Backtesting → Accounting path, maps the resulting artefacts, and validates a common correlation identifier and complete causation/audit chain.
 

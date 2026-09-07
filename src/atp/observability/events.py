@@ -8,10 +8,15 @@ from decimal import Decimal
 from enum import Enum, StrEnum
 from types import MappingProxyType
 
+from atp.accounting.model import AccountingReasonCode, AccountingStatus
+from atp.backtesting.model import BacktestReasonCode, BacktestStatus, SimulatedOrderSide
+from atp.data.snapshot import DataQuality, FreshnessStatus, GapStatus
+from atp.risk.model import RiskReasonCode, RiskStatus
 from atp.shared.environment import Environment
 from atp.shared.errors import ValidationError
 from atp.shared.identity import CausationId, ContentIdentity, CorrelationId, EventId
 from atp.shared.time import require_utc
+from atp.strategy.model import EvaluationStatus, ReasonCode, SignalKind
 
 EVENT_SCHEMA_VERSION = "1.0"
 
@@ -205,17 +210,17 @@ def _freeze_payload(value: object, *, key: str | None = None) -> object:
     if isinstance(value, Decimal):
         if not value.is_finite():
             raise _InvalidEvent(ObservabilityReasonCode.INVALID_PAYLOAD)
-        return str(value)
+        return value
     if isinstance(value, datetime):
         try:
             require_utc(value)
         except ValidationError as exc:
             raise _InvalidEvent(ObservabilityReasonCode.INVALID_PAYLOAD) from exc
-        return value.isoformat()
+        return value
     if isinstance(value, ContentIdentity):
-        return str(value)
+        return value
     if isinstance(value, Enum):
-        return _freeze_payload(value.value)
+        return value
     if isinstance(value, Mapping):
         normalized: dict[str, object] = {}
         for raw_key, item in value.items():
@@ -233,6 +238,12 @@ def _payload_canonical(value: object) -> object:
         return {key: _payload_canonical(item) for key, item in value.items()}
     if isinstance(value, tuple):
         return [_payload_canonical(item) for item in value]
+    if isinstance(value, Decimal | ContentIdentity):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return _payload_canonical(value.value)
     return value
 
 
@@ -455,6 +466,7 @@ def _validated_components(
     frozen_payload = _freeze_payload(payload)
     if not isinstance(frozen_payload, Mapping):
         raise _InvalidEvent(ObservabilityReasonCode.INVALID_PAYLOAD)
+    _validate_payload_values(event_type, payload)
     expected_module, expected_subject, expected_fields = _EVENT_CONTRACTS[event_type]
     if module is not expected_module:
         raise _InvalidEvent(ObservabilityReasonCode.INVALID_EVENT_INPUT)
@@ -483,6 +495,187 @@ def _validated_components(
         "subject_type": subject_type_value,
     }
     return canonical, frozen_payload
+
+
+def _validate_payload_values(event_type: EventType, payload: Mapping[object, object]) -> None:
+    try:
+        if event_type is EventType.DATA_SNAPSHOT_ACCEPTED:
+            valid = (
+                isinstance(payload["quality"], DataQuality)
+                and isinstance(payload["freshness"], FreshnessStatus)
+                and isinstance(payload["gap_status"], GapStatus)
+                and _is_trimmed_text(payload["dataset_id"])
+                and _is_trimmed_text(payload["snapshot_id"])
+            )
+        elif event_type is EventType.DATA_SNAPSHOT_BLOCKED:
+            valid = payload["status"] == "BLOCKED" and _is_trimmed_text(payload["reason_code"])
+        elif event_type is EventType.STRATEGY_EVALUATED:
+            status = payload["evaluation_status"]
+            signal = payload["signal_kind"]
+            reason = payload["reason_code"]
+            valid = (
+                isinstance(status, EvaluationStatus)
+                and (signal is None or isinstance(signal, SignalKind))
+                and (reason is None or isinstance(reason, ReasonCode))
+                and _is_trimmed_text(payload["strategy_id"])
+                and _is_trimmed_text(payload["strategy_version"])
+                and (
+                    (status is EvaluationStatus.COMPLETED and signal is not None and reason is None)
+                    or (
+                        status is not EvaluationStatus.COMPLETED
+                        and signal is None
+                        and reason is not None
+                    )
+                )
+            )
+        elif event_type is EventType.RISK_DECISION_PRODUCED:
+            risk_status = payload["risk_status"]
+            risk_reason = payload["risk_reason_code"]
+            valid = (
+                isinstance(risk_status, RiskStatus)
+                and isinstance(risk_reason, RiskReasonCode)
+                and _risk_reason_matches_status(risk_status, risk_reason)
+                and _is_trimmed_text(payload["risk_policy_id"])
+                and _is_trimmed_text(payload["risk_policy_version"])
+            )
+        elif event_type is EventType.SIMULATED_ORDER_CREATED:
+            valid = isinstance(payload["side"], SimulatedOrderSide) and _is_trimmed_text(
+                payload["symbol"]
+            )
+        elif event_type is EventType.SIMULATED_FILL_PRODUCED:
+            valid = (
+                _is_finite_decimal(payload["fill_price"], positive=True)
+                and isinstance(payload["side"], SimulatedOrderSide)
+                and isinstance(payload["source_bar_identity"], ContentIdentity)
+                and _is_trimmed_text(payload["symbol"])
+            )
+        elif event_type in {EventType.BACKTEST_COMPLETED, EventType.BACKTEST_BLOCKED}:
+            expected_backtest_status = (
+                BacktestStatus.COMPLETED
+                if event_type is EventType.BACKTEST_COMPLETED
+                else BacktestStatus.BLOCKED
+            )
+            valid = (
+                payload["status"] is expected_backtest_status
+                and (
+                    (
+                        expected_backtest_status is BacktestStatus.COMPLETED
+                        and payload["reason_code"] is None
+                    )
+                    or (
+                        expected_backtest_status is BacktestStatus.BLOCKED
+                        and isinstance(payload["reason_code"], BacktestReasonCode)
+                    )
+                )
+                and _valid_fill_order_counts(
+                    payload["number_of_orders"], payload["number_of_fills"]
+                )
+            )
+        elif event_type is EventType.ACCOUNTING_ENTRY_APPLIED:
+            valid = (
+                _is_finite_decimal(payload["cash_delta"])
+                and _is_finite_decimal(payload["realized_pnl_delta"])
+                and isinstance(payload["side"], SimulatedOrderSide)
+                and _is_trimmed_text(payload["symbol"])
+            )
+        elif event_type in {
+            EventType.ACCOUNTING_REPLAY_COMPLETED,
+            EventType.ACCOUNTING_REPLAY_BLOCKED,
+        }:
+            expected_accounting_status = (
+                AccountingStatus.COMPLETED
+                if event_type is EventType.ACCOUNTING_REPLAY_COMPLETED
+                else AccountingStatus.BLOCKED
+            )
+            valid = (
+                payload["status"] is expected_accounting_status
+                and (
+                    (
+                        expected_accounting_status is AccountingStatus.COMPLETED
+                        and payload["reason_code"] is None
+                    )
+                    or (
+                        expected_accounting_status is AccountingStatus.BLOCKED
+                        and isinstance(payload["reason_code"], AccountingReasonCode)
+                    )
+                )
+                and _is_non_negative_int(payload["ledger_entries"])
+            )
+        else:
+            expected_valuation_status = (
+                AccountingStatus.COMPLETED
+                if event_type is EventType.ACCOUNTING_VALUATION_PRODUCED
+                else AccountingStatus.BLOCKED
+            )
+            equity = payload["equity"]
+            valid = payload["status"] is expected_valuation_status and (
+                (
+                    expected_valuation_status is AccountingStatus.COMPLETED
+                    and payload["reason_code"] is None
+                    and _is_finite_decimal(equity)
+                )
+                or (
+                    expected_valuation_status is AccountingStatus.BLOCKED
+                    and isinstance(payload["reason_code"], AccountingReasonCode)
+                    and equity is None
+                )
+            )
+    except (KeyError, TypeError):
+        valid = False
+    if not valid:
+        raise _InvalidEvent(ObservabilityReasonCode.INVALID_PAYLOAD)
+
+
+def _is_trimmed_text(value: object) -> bool:
+    return isinstance(value, str) and bool(value) and value.strip() == value
+
+
+def _is_finite_decimal(value: object, *, positive: bool = False) -> bool:
+    return isinstance(value, Decimal) and value.is_finite() and (not positive or value > 0)
+
+
+def _is_non_negative_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _valid_fill_order_counts(orders: object, fills: object) -> bool:
+    return (
+        _is_non_negative_int(orders)
+        and _is_non_negative_int(fills)
+        and isinstance(orders, int)
+        and isinstance(fills, int)
+        and fills <= orders
+    )
+
+
+def _risk_reason_matches_status(status: RiskStatus, reason: RiskReasonCode) -> bool:
+    if status is RiskStatus.APPROVED:
+        return reason is RiskReasonCode.POLICY_COMPLIANT
+    if status is RiskStatus.NO_DECISION:
+        return reason is RiskReasonCode.STRATEGY_NO_ACTION
+    if status is RiskStatus.REJECTED:
+        return reason in {
+            RiskReasonCode.MARKET_TYPE_NOT_SPOT,
+            RiskReasonCode.POSITION_DIRECTION_NOT_LONG,
+            RiskReasonCode.MARGIN_NOT_ALLOWED,
+            RiskReasonCode.LEVERAGE_NOT_ALLOWED,
+            RiskReasonCode.INSTRUMENT_CLASS_NOT_SPOT,
+            RiskReasonCode.MAX_POSITIONS_REACHED,
+            RiskReasonCode.NO_OPEN_POSITION,
+            RiskReasonCode.POSITION_SYMBOL_MISMATCH,
+        }
+    return reason in {
+        RiskReasonCode.STRATEGY_INPUT_INCOMPLETE,
+        RiskReasonCode.STRATEGY_INPUT_NOT_REPRODUCIBLE,
+        RiskReasonCode.STRATEGY_CONTEXT_INCOMPATIBLE,
+        RiskReasonCode.MARKET_SYMBOL_MISMATCH,
+        RiskReasonCode.UNKNOWN_ENVIRONMENT,
+        RiskReasonCode.ENVIRONMENT_NOT_ACTIVE,
+        RiskReasonCode.MARKET_CONTEXT_INCOMPLETE,
+        RiskReasonCode.PORTFOLIO_STATE_UNKNOWN,
+        RiskReasonCode.PORTFOLIO_STATE_INCONSISTENT,
+        RiskReasonCode.PORTFOLIO_POLICY_VIOLATION,
+    }
 
 
 def _validate_event_semantics(
@@ -517,7 +710,7 @@ def _validate_event_semantics(
     if event_type is EventType.STRATEGY_EVALUATED:
         expected = (
             EventSeverity.INFO
-            if payload["evaluation_status"] == "COMPLETED"
+            if payload["evaluation_status"] is EvaluationStatus.COMPLETED
             else EventSeverity.ERROR
         )
         if category is not EventCategory.DOMAIN or severity is not expected:
@@ -526,21 +719,21 @@ def _validate_event_semantics(
         status = payload["risk_status"]
         expected = (
             EventSeverity.ERROR
-            if status == "BLOCKED"
+            if status is RiskStatus.BLOCKED
             else EventSeverity.WARNING
-            if status == "REJECTED"
+            if status is RiskStatus.REJECTED
             else EventSeverity.INFO
         )
         if category is not EventCategory.CONTROL or severity is not expected:
             raise _InvalidEvent(ObservabilityReasonCode.INVALID_PAYLOAD)
     expected_status = {
         EventType.DATA_SNAPSHOT_BLOCKED: "BLOCKED",
-        EventType.BACKTEST_COMPLETED: "COMPLETED",
-        EventType.BACKTEST_BLOCKED: "BLOCKED",
-        EventType.ACCOUNTING_REPLAY_COMPLETED: "COMPLETED",
-        EventType.ACCOUNTING_REPLAY_BLOCKED: "BLOCKED",
-        EventType.ACCOUNTING_VALUATION_PRODUCED: "COMPLETED",
-        EventType.ACCOUNTING_VALUATION_BLOCKED: "BLOCKED",
+        EventType.BACKTEST_COMPLETED: BacktestStatus.COMPLETED,
+        EventType.BACKTEST_BLOCKED: BacktestStatus.BLOCKED,
+        EventType.ACCOUNTING_REPLAY_COMPLETED: AccountingStatus.COMPLETED,
+        EventType.ACCOUNTING_REPLAY_BLOCKED: AccountingStatus.BLOCKED,
+        EventType.ACCOUNTING_VALUATION_PRODUCED: AccountingStatus.COMPLETED,
+        EventType.ACCOUNTING_VALUATION_BLOCKED: AccountingStatus.BLOCKED,
     }.get(event_type)
     if expected_status is not None and payload["status"] != expected_status:
         raise _InvalidEvent(ObservabilityReasonCode.INVALID_PAYLOAD)

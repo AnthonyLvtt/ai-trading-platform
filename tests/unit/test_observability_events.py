@@ -20,6 +20,7 @@ from atp.observability import (
 from atp.shared.environment import Environment
 from atp.shared.errors import ValidationError
 from atp.shared.identity import CausationId, ContentIdentity, CorrelationId, EventId
+from atp.strategy.model import EvaluationStatus, SignalKind
 
 NOW = datetime(2026, 9, 7, 12, tzinfo=UTC)
 SUBJECT = ContentIdentity.from_text("subject")
@@ -47,9 +48,9 @@ def event(
         subject_id="strategy-evaluation:fixture",
         subject_content_identity=subject_identity,
         payload={
-            "evaluation_status": "COMPLETED",
+            "evaluation_status": EvaluationStatus.COMPLETED,
             "reason_code": None,
-            "signal_kind": "LONG_ENTRY",
+            "signal_kind": SignalKind.LONG_ENTRY,
             "strategy_id": "sma-crossover",
             "strategy_version": "1.0.0",
         }
@@ -64,9 +65,9 @@ def event(
 
 def test_same_event_has_same_identity_and_identifier() -> None:
     payload = {
-        "evaluation_status": "COMPLETED",
+        "evaluation_status": EvaluationStatus.COMPLETED,
         "reason_code": None,
-        "signal_kind": "LONG_ENTRY",
+        "signal_kind": SignalKind.LONG_ENTRY,
         "strategy_id": "sma-crossover",
         "strategy_version": "1.0.0",
     }
@@ -143,6 +144,74 @@ def test_malformed_runtime_payload_is_fail_closed(payload: object) -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("signal_kind", 123),
+        ("strategy_version", False),
+        ("evaluation_status", "COMPLETED"),
+    ],
+)
+def test_correct_strategy_fields_with_wrong_value_types_are_blocked(
+    field: str, bad_value: object
+) -> None:
+    payload: dict[str, object] = {
+        "evaluation_status": EvaluationStatus.COMPLETED,
+        "reason_code": None,
+        "signal_kind": SignalKind.LONG_ENTRY,
+        "strategy_id": "sma-crossover",
+        "strategy_version": "1.0.0",
+    }
+    payload[field] = bad_value
+
+    result = build_event(
+        event_type=EventType.STRATEGY_EVALUATED,
+        occurred_at=NOW,
+        environment=Environment.BACKTEST,
+        module=EventModule.STRATEGY,
+        category=EventCategory.DOMAIN,
+        severity=EventSeverity.INFO,
+        correlation_id=CORRELATION,
+        causation_id=None,
+        subject_type="StrategyEvaluation",
+        subject_id="strategy-evaluation:fixture",
+        subject_content_identity=SUBJECT,
+        payload=payload,
+        previous_event_identity=None,
+    )
+
+    assert result.status is ObservabilityStatus.BLOCKED
+    assert result.reason_code is ObservabilityReasonCode.INVALID_PAYLOAD
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"side": 42, "symbol": "BTCUSDT"},
+        {"side": "BUY_ENTRY", "symbol": True},
+    ],
+)
+def test_correct_order_fields_with_wrong_value_types_are_blocked(payload: object) -> None:
+    result = build_event(
+        event_type=EventType.SIMULATED_ORDER_CREATED,
+        occurred_at=NOW,
+        environment=Environment.BACKTEST,
+        module=EventModule.BACKTESTING,
+        category=EventCategory.DOMAIN,
+        severity=EventSeverity.INFO,
+        correlation_id=CORRELATION,
+        causation_id=None,
+        subject_type="SimulatedOrder",
+        subject_id="simulated-order:fixture",
+        subject_content_identity=SUBJECT,
+        payload=payload,
+        previous_event_identity=None,
+    )
+
+    assert result.status is ObservabilityStatus.BLOCKED
+    assert result.reason_code is ObservabilityReasonCode.INVALID_PAYLOAD
+
+
 def test_non_utc_event_time_is_blocked() -> None:
     result = build_event(
         event_type=EventType.STRATEGY_EVALUATED,
@@ -192,7 +261,7 @@ def test_tampered_event_is_detected() -> None:
         "payload",
         {
             **observed.payload,
-            "signal_kind": "EXIT",
+            "signal_kind": SignalKind.EXIT,
         },
     )
 

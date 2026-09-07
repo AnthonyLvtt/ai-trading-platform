@@ -39,7 +39,7 @@ from atp.observability import (
     observe_accounting_replay,
     observe_backtest,
     observe_data_snapshot,
-    observe_risk_at,
+    observe_risk,
     observe_simulated_fill,
     observe_simulated_order,
     observe_strategy,
@@ -92,7 +92,7 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
         environment=Environment.BACKTEST,
         schema_version="candle-v1",
         transformation_version="normalize-v1",
-        created_at=start + timedelta(minutes=4),
+        created_at=start + timedelta(minutes=3),
         points=points,
         quality=DataQuality.VALID,
         freshness=FreshnessStatus.FRESH,
@@ -110,11 +110,12 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
         decisions=(SymbolDecision("BTCUSDT", True, "eligible fixture", start),),
     )
     evaluation_time = start + timedelta(minutes=3)
-    strategy = SmaCrossoverStrategy(
+    strategy_engine = SmaCrossoverStrategy(
         strategy_id=StrategyId("sma-crossover"),
         version="1.0.0",
         configuration=SmaCrossoverConfig(short_window=2, long_window=3),
-    ).evaluate(
+    )
+    strategy = strategy_engine.evaluate(
         StrategyEvaluationContext(
             environment=Environment.BACKTEST,
             snapshot=snapshot,
@@ -140,23 +141,21 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
             portfolio_state=PortfolioState.create(PortfolioKnowledgeStatus.KNOWN_EMPTY),
         )
     )
-    backtest = DeterministicBacktestEngine(SimulationPolicy.v1()).replay(
-        BacktestInput(
-            snapshot=snapshot,
-            steps=(ReplayStep(strategy, risk, points[3]),),
-            initial_state=SimulatedPositionState.empty(),
-        )
+    backtest_input = BacktestInput(
+        snapshot=snapshot,
+        steps=(ReplayStep(strategy, risk, points[3]),),
+        initial_state=SimulatedPositionState.empty(),
     )
+    backtest = DeterministicBacktestEngine(SimulationPolicy.v1()).replay(backtest_input)
     order = backtest.steps[0].order
     fill = backtest.steps[0].fill
     assert order is not None and fill is not None
-    accounting = AccountingEngine().replay(
-        AccountingReplayInput(
-            initial_cash=Decimal("100"),
-            currency="USDT",
-            executions=(AccountingExecution(fill, Decimal("2")),),
-        )
+    accounting_input = AccountingReplayInput(
+        initial_cash=Decimal("100"),
+        currency="USDT",
+        executions=(AccountingExecution(fill, Decimal("2")),),
     )
+    accounting = AccountingEngine().replay(accounting_input)
     entry = accounting.ledger[0]
 
     correlation = CorrelationId(f"correlation:{backtest.input_identity}")
@@ -187,16 +186,14 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
             snapshot,
             accepted=True,
             reason_code=None,
-            occurred_at=evaluation_time,
             context=context(),
         )
     )
     append(observe_strategy(strategy, context=context()))
     append(
-        observe_risk_at(
+        observe_risk(
             risk,
-            occurred_at=evaluation_time,
-            environment=Environment.BACKTEST,
+            strategy_evaluation=strategy,
             context=context(),
         )
     )
@@ -205,8 +202,7 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
     append(
         observe_backtest(
             backtest,
-            occurred_at=fill.fill_time,
-            environment=Environment.BACKTEST,
+            replay_input=backtest_input,
             context=context(),
         )
     )
@@ -214,7 +210,7 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
     append(
         observe_accounting_replay(
             accounting,
-            occurred_at=fill.fill_time,
+            replay_input=accounting_input,
             environment=Environment.BACKTEST,
             context=context(),
         )
@@ -233,6 +229,31 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
         EventType.ACCOUNTING_REPLAY_COMPLETED,
     ]
     assert all(event.classification.value == "INTERNAL" for event in journal.events)
+    assert journal.events[0].occurred_at == snapshot.created_at
+    assert journal.events[1].occurred_at == strategy.provenance.evaluation_time.value
+    assert journal.events[2].occurred_at == strategy.provenance.evaluation_time.value
+    assert journal.events[3].occurred_at == order.created_at
+    assert journal.events[4].occurred_at == fill.fill_time
+    assert journal.events[5].occurred_at == fill.fill_time
+    assert journal.events[6].occurred_at == entry.provenance.fill_time
+    assert journal.events[7].occurred_at == entry.provenance.fill_time
+
+    forged_strategy_time = strategy_engine.evaluate(
+        StrategyEvaluationContext(
+            environment=Environment.BACKTEST,
+            snapshot=snapshot,
+            universe=universe,
+            evaluation_time=LogicalTime(start + timedelta(minutes=2)),
+            symbol="BTCUSDT",
+        )
+    )
+    forged_time = observe_risk(
+        risk,
+        strategy_evaluation=forged_strategy_time,
+        context=ObservationContext(correlation),
+    )
+    assert forged_time.status is ObservabilityStatus.BLOCKED
+    assert forged_time.event is None
 
 
 def test_observability_has_no_forbidden_authority_or_infrastructure_imports() -> None:

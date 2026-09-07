@@ -3,13 +3,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from atp.accounting.model import (
     AccountingEntry,
+    AccountingExecution,
+    AccountingReplayInput,
     AccountingReplayResult,
     AccountingStatus,
     AccountingValuation,
 )
+from atp.backtesting.engine import BacktestInput
 from atp.backtesting.model import BacktestResult, BacktestStatus, SimulatedFill, SimulatedOrder
 from atp.data.snapshot import DatasetSnapshot
 from atp.observability.events import (
@@ -39,7 +43,6 @@ def observe_data_snapshot(
     *,
     accepted: bool,
     reason_code: str | None,
-    occurred_at: datetime | None = None,
     context: ObservationContext,
 ) -> EventValidationResult:
     if not _valid_artifact(snapshot, DatasetSnapshot):
@@ -59,7 +62,7 @@ def observe_data_snapshot(
     )
     return _build(
         event_type=event_type,
-        occurred_at=snapshot.created_at if occurred_at is None else occurred_at,
+        occurred_at=snapshot.created_at,
         environment=snapshot.environment,
         module=EventModule.DATA,
         category=EventCategory.DOMAIN if accepted else EventCategory.CONTROL,
@@ -100,17 +103,27 @@ def observe_strategy(evaluation: object, *, context: ObservationContext) -> Even
     )
 
 
-def observe_risk_at(
+def observe_risk(
     result: object,
     *,
-    occurred_at: datetime,
-    environment: Environment,
+    strategy_evaluation: object,
     context: ObservationContext,
 ) -> EventValidationResult:
-    if not _valid_artifact(result, RiskProcessingResult):
+    if not _valid_artifact(result, RiskProcessingResult) or not _valid_artifact(
+        strategy_evaluation, StrategyEvaluation
+    ):
         return invalid_event_result(result)
     assert isinstance(result, RiskProcessingResult)
-    if result.provenance.environment != environment.value:
+    assert isinstance(strategy_evaluation, StrategyEvaluation)
+    signal_identity = (
+        None if strategy_evaluation.signal is None else strategy_evaluation.signal.content_identity
+    )
+    if (
+        result.provenance.environment != strategy_evaluation.provenance.environment.value
+        or result.provenance.strategy_evaluation_id != strategy_evaluation.strategy_evaluation_id
+        or result.provenance.strategy_evaluation_identity != strategy_evaluation.content_identity
+        or result.provenance.strategy_signal_identity != signal_identity
+    ):
         return invalid_event_result(result)
     subject_id = (
         str(result.risk_decision_id)
@@ -126,8 +139,8 @@ def observe_risk_at(
     )
     return _build(
         event_type=EventType.RISK_DECISION_PRODUCED,
-        occurred_at=occurred_at,
-        environment=environment,
+        occurred_at=strategy_evaluation.provenance.evaluation_time.value,
+        environment=strategy_evaluation.provenance.environment,
         module=EventModule.RISK,
         category=EventCategory.CONTROL,
         severity=severity,
@@ -194,18 +207,22 @@ def observe_simulated_fill(
 def observe_backtest(
     result: object,
     *,
-    occurred_at: datetime,
-    environment: Environment,
+    replay_input: object,
     context: ObservationContext,
 ) -> EventValidationResult:
-    if not _valid_artifact(result, BacktestResult):
+    if not _valid_artifact(result, BacktestResult) or not _valid_backtest_input(replay_input):
         return invalid_event_result(result)
     assert isinstance(result, BacktestResult)
+    assert isinstance(replay_input, BacktestInput)
+    if result.input_identity != replay_input.content_identity or len(result.steps) > len(
+        replay_input.steps
+    ):
+        return invalid_event_result(result)
     completed = result.status is BacktestStatus.COMPLETED
     return _build(
         event_type=EventType.BACKTEST_COMPLETED if completed else EventType.BACKTEST_BLOCKED,
-        occurred_at=occurred_at,
-        environment=environment,
+        occurred_at=_backtest_occurred_at(result, replay_input),
+        environment=replay_input.snapshot.environment,
         module=EventModule.BACKTESTING,
         category=EventCategory.DOMAIN if completed else EventCategory.CONTROL,
         severity=EventSeverity.INFO if completed else EventSeverity.ERROR,
@@ -251,13 +268,21 @@ def observe_accounting_entry(
 def observe_accounting_replay(
     result: object,
     *,
-    occurred_at: datetime,
+    replay_input: object,
     environment: Environment,
     context: ObservationContext,
 ) -> EventValidationResult:
-    if not _valid_artifact(result, AccountingReplayResult):
+    if not _valid_artifact(result, AccountingReplayResult) or not _valid_accounting_input(
+        replay_input
+    ):
         return invalid_event_result(result)
     assert isinstance(result, AccountingReplayResult)
+    assert isinstance(replay_input, AccountingReplayInput)
+    if result.input_identity != replay_input.content_identity:
+        return invalid_event_result(result)
+    occurred_at = _accounting_replay_occurred_at(result, replay_input)
+    if occurred_at is None:
+        return invalid_event_result(result)
     completed = result.status is AccountingStatus.COMPLETED
     return _build(
         event_type=EventType.ACCOUNTING_REPLAY_COMPLETED
@@ -377,3 +402,69 @@ def _valid_artifact(value: object, expected_type: type[object]) -> bool:
     except Exception:  # noqa: BLE001 - domain adapter trust boundary must fail closed
         return False
     return True
+
+
+def _valid_backtest_input(value: object) -> bool:
+    if not isinstance(value, BacktestInput):
+        return False
+    try:
+        if not _valid_artifact(value.snapshot, DatasetSnapshot) or not isinstance(
+            value.steps, tuple
+        ):
+            return False
+        return isinstance(value.content_identity, ContentIdentity)
+    except Exception:  # noqa: BLE001 - causal evidence boundary must fail closed
+        return False
+
+
+def _backtest_occurred_at(result: BacktestResult, replay_input: BacktestInput) -> datetime:
+    times = [replay_input.snapshot.created_at]
+    times.extend(
+        step.strategy_evaluation.provenance.evaluation_time.value
+        for step in replay_input.steps[: len(result.steps)]
+    )
+    for step in result.steps:
+        if step.order is not None:
+            times.append(step.order.created_at)
+        if step.fill is not None:
+            times.append(step.fill.fill_time)
+    return max(times)
+
+
+def _valid_accounting_input(value: object) -> bool:
+    if not isinstance(value, AccountingReplayInput):
+        return False
+    try:
+        if (
+            not isinstance(value.initial_cash, Decimal)
+            or not value.initial_cash.is_finite()
+            or value.initial_cash < 0
+            or value.currency != "USDT"
+            or not isinstance(value.executions, tuple)
+        ):
+            return False
+        for execution in value.executions:
+            if (
+                not isinstance(execution, AccountingExecution)
+                or not isinstance(execution.quantity, Decimal)
+                or not execution.quantity.is_finite()
+                or execution.quantity <= 0
+                or not _valid_artifact(execution.simulated_fill, SimulatedFill)
+            ):
+                return False
+        return isinstance(value.content_identity, ContentIdentity)
+    except Exception:  # noqa: BLE001 - causal evidence boundary must fail closed
+        return False
+
+
+def _accounting_replay_occurred_at(
+    result: AccountingReplayResult, replay_input: AccountingReplayInput
+) -> datetime | None:
+    applied = len(result.ledger)
+    if result.status is AccountingStatus.BLOCKED and applied < len(replay_input.executions):
+        return replay_input.executions[applied].simulated_fill.fill_time
+    if result.ledger:
+        return result.ledger[-1].provenance.fill_time
+    if replay_input.executions:
+        return replay_input.executions[-1].simulated_fill.fill_time
+    return None
