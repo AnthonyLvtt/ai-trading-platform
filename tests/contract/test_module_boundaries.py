@@ -115,5 +115,13 @@ def test_module_import_has_no_exchange_side_effect(
     block_network: Callable[..., NoReturn],
 ) -> None:
     del block_network
-    sys.modules.pop(module_name, None)
-    assert importlib.import_module(module_name) is not None
+    # Restore the cached module: re-import probes must not replace domain type identities
+    # used by subsequently executed contract tests.
+    original = sys.modules.pop(module_name, None)
+    try:
+        assert importlib.import_module(module_name) is not None
+    finally:
+        if original is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = original
