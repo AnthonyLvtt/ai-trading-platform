@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from dataclasses import field as dataclass_field
 from enum import StrEnum
 
+from atp.shared.errors import ValidationError
 from atp.shared.identity import ContentIdentity
 
 
@@ -170,8 +172,17 @@ class QualificationSuiteResult:
     case_results: tuple[QualificationCaseResult, ...]
     qualification_policy_identity: ContentIdentity
 
-    @property
-    def content_identity(self) -> ContentIdentity:
+    content_identity: ContentIdentity = dataclass_field(init=False)
+
+    def __post_init__(self) -> None:
+        expected = self.recompute_content_identity()
+        if hasattr(self, "content_identity"):
+            if self.content_identity != expected:
+                raise ValidationError("Stored result identity is inconsistent")
+        else:
+            object.__setattr__(self, "content_identity", expected)
+
+    def recompute_content_identity(self) -> ContentIdentity:
         return ContentIdentity.from_canonical(
             {
                 "suite_id": self.suite_id,

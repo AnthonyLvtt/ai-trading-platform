@@ -34,13 +34,9 @@ from atp.ops.model import (
     OperationalReasonCode as Reason,
 )
 from atp.shared.identity import ContentIdentity
-from atp.test_qualification.catalogue import cases_v1, suite_v1
+from atp.test_qualification.inspection import validate_qualification_result
 from atp.test_qualification.model import (
-    QualificationCaseResult,
-    QualificationPolicy,
-    QualificationReasonCode,
     QualificationStatus,
-    QualificationSuiteResult,
 )
 
 _ERRORS = (ValueError, TypeError, AttributeError, KeyError, RecursionError)
@@ -143,70 +139,18 @@ def _observability(value: object) -> bool:
 
 
 def _qualification(value: object) -> bool:
-    """Integrity validation only: do not invoke the qualification evaluator."""
+    """Check the pinned reference against the public qualification inspection contract."""
     if type(value) is not QualificationReference:
         return False
     assert isinstance(value, QualificationReference)
-    try:
-        result = value.result
-        if type(result) is not QualificationSuiteResult or not _valid_identity(
-            value.content_identity
-        ):
-            return False
-        suite, policy = suite_v1(), QualificationPolicy()
-        if (
-            type(result.suite_id) is not str
-            or result.suite_id != suite.suite_id
-            or type(result.suite_version) is not str
-            or result.suite_version != suite.suite_version
-            or result.status is not QualificationStatus.PASSED
-            or result.reason_code is not QualificationReasonCode.QUALIFICATION_PASSED
-            or not _valid_identity(result.suite_identity)
-            or result.suite_identity != suite.content_identity
-            or not _valid_identity(result.qualification_policy_identity)
-            or result.qualification_policy_identity != policy.content_identity
-            or type(result.case_results) is not tuple
-        ):
-            return False
-        definitions = {c.case_id: c for c in cases_v1()}
-        ids = []
-        evidence_ids: list[str] = []
-        for case in result.case_results:
-            if type(case) is not QualificationCaseResult or type(case.case_id) is not str:
-                return False
-            definition = definitions.get(case.case_id)
-            if (
-                definition is None
-                or case.status is not QualificationStatus.PASSED
-                or case.reason_code is not QualificationReasonCode.QUALIFICATION_PASSED
-                or not _valid_identity(case.case_identity)
-                or case.case_identity != definition.content_identity
-                or not _valid_identity(case.qualification_policy_identity)
-                or case.qualification_policy_identity != policy.content_identity
-                or type(case.evaluated_evidence_ids) is not tuple
-                or type(case.evaluated_evidence_identities) is not tuple
-            ):
-                return False
-            names = case.evaluated_evidence_ids
-            if (
-                len(names) != len(definition.required_checks)
-                or len(names) != len(case.evaluated_evidence_identities)
-                or not all(type(n) is str and n and n.strip() == n for n in names)
-                or not all(_valid_identity(i) for i in case.evaluated_evidence_identities)
-                or tuple(sorted(set(names))) != names
-            ):
-                return False
-            ids.append(case.case_id)
-            evidence_ids.extend(names)
-        if tuple(ids) != suite.required_case_ids or len(set(evidence_ids)) != len(evidence_ids):
-            return False
-        return (
-            result.content_identity == value.content_identity
-            and type(value.qualification_run_id) is str
-            and value.qualification_run_id == f"qualification-run:{value.content_identity}"
-        )
-    except _ERRORS:
-        return False
+    return (
+        validate_qualification_result(value.result)
+        and value.result.status is QualificationStatus.PASSED
+        and _valid_identity(value.content_identity)
+        and value.result.content_identity == value.content_identity
+        and type(value.qualification_run_id) is str
+        and value.result.qualification_run_id == value.qualification_run_id
+    )
 
 
 def health(value: object) -> HealthStatus:

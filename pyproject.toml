@@ -4,13 +4,16 @@ version = "0.1.0"
 description = "AI Trading Platform modular monolith foundation"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "fastapi==0.141.1",
+]
 
 [project.scripts]
 atp-diagnostic = "atp.diagnostic:main"
 
 [dependency-groups]
 dev = [
+  "httpx==0.28.1",
   "mypy==1.17.1",
   "pytest==8.4.1",
   "ruff==0.12.9",
