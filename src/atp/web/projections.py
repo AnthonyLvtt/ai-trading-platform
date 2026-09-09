@@ -8,8 +8,8 @@ from typing import cast
 
 from atp.accounting.model import AccountingReplayResult, AccountingValuation
 from atp.backtesting.engine import BacktestInput
+from atp.backtesting.inspection import backtest_causal_time
 from atp.backtesting.model import BacktestResult, SimulatedOrderOutcome
-from atp.observability.adapters import _backtest_occurred_at
 from atp.observability.audit import AuditJournal
 from atp.ops.model import OperationalHealthEvidence, OperationalReadinessResult
 from atp.shared.errors import ValidationError
@@ -142,7 +142,7 @@ def _required(ref: ArtifactReference | None) -> object:
 
 def _time(ref: ArtifactReference) -> datetime:
     result = cast(BacktestResult, ref.artifact)
-    time = _backtest_occurred_at(result, cast(BacktestInput, ref.causal_input))
+    time = backtest_causal_time(result, cast(BacktestInput, ref.causal_input))
     assert time is not None
     return time
 

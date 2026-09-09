@@ -14,6 +14,7 @@ from atp.accounting.model import (
     AccountingValuation,
 )
 from atp.backtesting.engine import BacktestInput
+from atp.backtesting.inspection import backtest_causal_time
 from atp.backtesting.model import BacktestResult, BacktestStatus, SimulatedFill, SimulatedOrder
 from atp.data.snapshot import DatasetSnapshot
 from atp.observability.events import (
@@ -218,7 +219,7 @@ def observe_backtest(
         replay_input.steps
     ):
         return invalid_event_result(result)
-    occurred_at = _backtest_occurred_at(result, replay_input)
+    occurred_at = backtest_causal_time(result, replay_input)
     if occurred_at is None:
         return invalid_event_result(result)
     completed = result.status is BacktestStatus.COMPLETED
@@ -418,19 +419,6 @@ def _valid_backtest_input(value: object) -> bool:
         return isinstance(value.content_identity, ContentIdentity)
     except Exception:  # noqa: BLE001 - causal evidence boundary must fail closed
         return False
-
-
-def _backtest_occurred_at(result: BacktestResult, replay_input: BacktestInput) -> datetime | None:
-    times = [
-        step.strategy_evaluation.provenance.evaluation_time.value
-        for step in replay_input.steps[: len(result.steps)]
-    ]
-    for step in result.steps:
-        if step.order is not None:
-            times.append(step.order.created_at)
-        if step.fill is not None:
-            times.append(step.fill.fill_time)
-    return None if not times else max(times)
 
 
 def _valid_accounting_input(value: object) -> bool:

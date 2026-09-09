@@ -127,9 +127,19 @@ def test_sensitive_artifact_blocks_without_leakage(tmp_path):
 
 def test_linked_state_inconsistency_blocks(tmp_path):
     state = real_state(tmp_path)
+    from atp.ops.model import StartupCheck
+
+    other = ContentIdentity.from_text("other-qualified-result")
+    source = state.readiness_result.artifact
     altered = replace(
-        state.readiness_result.artifact,
-        qualification_result_identity=ContentIdentity.from_text("other-qualified-result"),
+        source,
+        qualification_result_identity=other,
+        startup_checks=tuple(
+            replace(check, evidence_identity=other)
+            if check.check is StartupCheck.QUALIFICATION_VALID
+            else check
+            for check in source.startup_checks
+        ),
     )
     state = replace(state, readiness_result=ref(altered))
     response = TestClient(create_app(state)).get("/readiness")
@@ -290,3 +300,112 @@ def test_collection_with_invalid_valuation_never_falls_back_to_replay(tmp_path):
     response = TestClient(create_app(state)).get("/accounting/latest")
     assert response.status_code == 409
     assert "cash" not in response.json()
+
+
+@pytest.mark.parametrize("replacement_identity", [False, True])
+def test_readiness_tampered_before_reference_is_not_blessed(tmp_path, replacement_identity):
+    from atp.shared.environment import Environment
+
+    result = real_state(tmp_path).readiness_result.artifact
+    original = result.content_identity
+    object.__setattr__(result, "environment", Environment.TEST)
+    object.__setattr__(
+        result,
+        "content_identity",
+        ContentIdentity.from_text("forged-readiness") if replacement_identity else original,
+    )
+    rejected = reference(result)
+    assert isinstance(rejected, WebError)
+    assert rejected.reason_code == "ARTIFACT_INTEGRITY_FAILURE"
+    # Inspection must not repair/re-pin a corrupt artefact.
+    assert result.content_identity == (
+        ContentIdentity.from_text("forged-readiness") if replacement_identity else original
+    )
+
+
+def test_readiness_rehashed_but_inconsistent_config_is_rejected(tmp_path):
+    from atp.shared.environment import Environment
+
+    result = real_state(tmp_path).readiness_result.artifact
+    object.__setattr__(result, "environment", Environment.TEST)
+    object.__setattr__(result, "content_identity", result.recompute_content_identity())
+    assert reference(result).reason_code == "ARTIFACT_INTEGRITY_FAILURE"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "readiness_result",
+        "qualification_result",
+        "audit_journal",
+        "backtest_results",
+        "accounting_replay_results",
+        "accounting_valuations",
+    ],
+)
+def test_every_stored_domain_identity_is_checked_before_pin(tmp_path, name):
+    state = real_state(tmp_path)
+    original = getattr(state, name)
+    original = original[0] if isinstance(original, tuple) else original
+    object.__setattr__(
+        original.artifact,
+        "content_identity",
+        ContentIdentity.from_text("arbitrary-domain-identity"),
+    )
+    result = reference(original.artifact, causal_input=original.causal_input)
+    assert isinstance(result, WebError)
+    assert result.reason_code == "ARTIFACT_INTEGRITY_FAILURE"
+
+
+def test_qualification_nested_tampering_before_pin_is_rejected(tmp_path):
+    result = real_state(tmp_path).qualification_result.artifact
+    original = result.content_identity
+    case = result.case_results[0]
+    names = list(case.evaluated_evidence_ids)
+    names[0] = "altered-evidence"
+    object.__setattr__(case, "evaluated_evidence_ids", tuple(sorted(names)))
+    assert reference(result).reason_code == "ARTIFACT_INTEGRITY_FAILURE"
+    assert result.content_identity == original
+
+
+def test_health_status_must_match_evidence_before_pin(tmp_path):
+    from atp.ops.model import HealthStatus
+
+    result = real_state(tmp_path).health_result.artifact
+    object.__setattr__(result, "health_status", HealthStatus.UNHEALTHY)
+    assert reference(result).reason_code == "ARTIFACT_INTEGRITY_FAILURE"
+
+
+def test_web_imports_only_public_cross_module_symbols():
+    for path in Path("src/atp/web").glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and node.module.startswith("atp.")
+                and not node.module.startswith("atp.web")
+            ):
+                assert all(not alias.name.startswith("_") for alias in node.names)
+
+
+def test_public_inspectors_are_read_only_and_fail_closed(tmp_path):
+    from atp.accounting.inspection import validate_accounting_replay, validate_accounting_valuation
+    from atp.backtesting.inspection import backtest_causal_time
+    from atp.ops.inspection import validate_readiness_result
+    from atp.test_qualification.inspection import validate_qualification_result
+
+    state = real_state(tmp_path)
+    for check, result in (
+        (validate_readiness_result, state.readiness_result.artifact),
+        (validate_qualification_result, state.qualification_result.artifact),
+        (validate_accounting_replay, state.accounting_replay_results[0].artifact),
+        (validate_accounting_valuation, state.accounting_valuations[0].artifact),
+    ):
+        assert check(result)
+        assert not check(None)
+        assert not check(object())
+        before = result.content_identity
+        assert check(result) and result.content_identity == before
+    bt = state.backtest_results[0]
+    assert backtest_causal_time(bt.artifact, bt.causal_input) == bt.artifact.steps[0].fill.fill_time
+    assert backtest_causal_time(object(), None) is None

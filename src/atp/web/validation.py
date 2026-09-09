@@ -12,35 +12,27 @@ from decimal import Decimal
 from enum import Enum
 from typing import NoReturn, Union, get_args, get_origin, get_type_hints
 
-from atp.accounting.engine import _valid_replay_result
+from atp.accounting.inspection import validate_accounting_replay, validate_accounting_valuation
 from atp.accounting.model import AccountingReplayResult, AccountingValuation
 from atp.accounting.policy import ACCOUNTING_POLICY_V1
 from atp.backtesting.engine import BacktestInput
+from atp.backtesting.inspection import backtest_causal_time
 from atp.backtesting.model import BacktestResult
 from atp.backtesting.policy import SimulationPolicy
-from atp.observability.adapters import _backtest_occurred_at
 from atp.observability.audit import AuditJournal, validate_journal
 from atp.observability.events import EVENT_SCHEMA_VERSION, SENSITIVE_KEYS, ObservabilityStatus
-from atp.ops.engine import _PRIORITY
-from atp.ops.engine import _qualification as valid_passed_qualification
+from atp.ops.inspection import validate_health_result, validate_readiness_result
 from atp.ops.model import (
-    CheckStatus,
     HealthStatus,
     OperationalHealthEvidence,
     OperationalPolicy,
     OperationalReadinessResult,
-    OperationalReasonCode,
-    QualificationReference,
-    ReadinessStatus,
-    StartupCheck,
 )
 from atp.shared.errors import ValidationError
 from atp.shared.identity import ContentIdentity
 from atp.shared.time import require_utc
-from atp.test_qualification import CASES_V1, SUITE_V1
+from atp.test_qualification.inspection import validate_qualification_result
 from atp.test_qualification.model import (
-    QualificationPolicy,
-    QualificationStatus,
     QualificationSuiteResult,
 )
 from atp.web.model import ArtifactReference, HealthResult, WebError, WebReasonCode
@@ -178,44 +170,6 @@ def _post_init(value: object) -> None:
             _post_init(item)
 
 
-def _qualification(result: QualificationSuiteResult) -> None:
-    if result.suite_id != SUITE_V1.suite_id or result.suite_version != "1.0":
-        fail(WebReasonCode.UNSUPPORTED_ARTIFACT_VERSION)
-    if (
-        result.suite_identity != SUITE_V1.content_identity
-        or result.qualification_policy_identity != QualificationPolicy().content_identity
-    ):
-        fail()
-    if result.status is QualificationStatus.PASSED and not valid_passed_qualification(
-        QualificationReference(result, result.content_identity, result.qualification_run_id)
-    ):
-        fail()
-    definitions = {c.case_id: c for c in CASES_V1}
-    ids = [c.case_id for c in result.case_results]
-    if len(set(ids)) != len(ids):
-        fail()
-    for case in result.case_results:
-        if (
-            case.case_id not in definitions
-            or case.case_identity != definitions[case.case_id].content_identity
-        ):
-            fail()
-        if case.qualification_policy_identity != result.qualification_policy_identity:
-            fail()
-        if len(case.evaluated_evidence_ids) != len(case.evaluated_evidence_identities) or len(
-            set(case.evaluated_evidence_ids)
-        ) != len(case.evaluated_evidence_ids):
-            fail()
-    if result.status is not QualificationStatus.BLOCKED:
-        if tuple(ids) != SUITE_V1.required_case_ids or any(
-            c.status is QualificationStatus.BLOCKED for c in result.case_results
-        ):
-            fail()
-        failed = any(c.status is QualificationStatus.FAILED for c in result.case_results)
-        if failed != (result.status is QualificationStatus.FAILED):
-            fail()
-
-
 def validate_domain(value: object, causal: object = None) -> ContentIdentity:
     safe_value(value)
     safe_value(causal)
@@ -228,69 +182,21 @@ def validate_domain(value: object, causal: object = None) -> ContentIdentity:
             or type(value.evidence) is not OperationalHealthEvidence
         ):
             fail(WebReasonCode.INVALID_WEB_ARTIFACT)
-        assert isinstance(value.evidence, OperationalHealthEvidence)
-        data = {
-            f.name: getattr(value.evidence, f.name)
-            for f in fields(value.evidence)
-            if f.name != "content_identity"
-        }
-        if ContentIdentity.from_canonical(data) != value.evidence.content_identity:
+        if not validate_health_result(value.health_status, value.evidence):
             fail()
         return fingerprint(value)
     if type(value) is OperationalReadinessResult:
         assert isinstance(value, OperationalReadinessResult)
         if value.ops_policy_identity != OperationalPolicy().content_identity:
             fail(WebReasonCode.UNSUPPORTED_ARTIFACT_VERSION)
-        if sorted(c.check for c in value.startup_checks) != sorted(StartupCheck) or not all(
-            c.critical for c in value.startup_checks
-        ):
+        if not validate_readiness_result(value):
             fail()
-        blocked = any(c.status is CheckStatus.BLOCKED for c in value.startup_checks)
-        if blocked != (value.readiness_status is ReadinessStatus.BLOCKED):
-            fail()
-        blocked_reasons = {
-            c.reason_code for c in value.startup_checks if c.status is CheckStatus.BLOCKED
-        }
-        expected_reason = next(
-            (r for r in _PRIORITY if r in blocked_reasons), OperationalReasonCode.OPERATIONAL_READY
-        )
-        if value.reason_code is not expected_reason:
-            fail()
-        if value.environment is not None:
-            inactive = {
-                "LIVE": OperationalReasonCode.LIVE_FORBIDDEN,
-                "TESTNET": OperationalReasonCode.TESTNET_NOT_AUTHORIZED,
-                "DRY_RUN": OperationalReasonCode.ENVIRONMENT_INACTIVE,
-            }
-            required_reason = inactive.get(value.environment.value)
-            if required_reason is not None and (
-                value.readiness_status is not ReadinessStatus.BLOCKED
-                or value.reason_code is not required_reason
-            ):
-                fail()
-        if any(
-            (c.status is CheckStatus.PASSED)
-            != (
-                c.reason_code
-                in (OperationalReasonCode.OPERATIONAL_READY, OperationalReasonCode.NOT_REQUIRED)
-            )
-            for c in value.startup_checks
-        ):
-            fail()
-        if value.config is not None:
-            data = {
-                f.name: getattr(value.config, f.name)
-                for f in fields(value.config)
-                if f.name != "content_identity"
-            }
-            if (
-                ContentIdentity.from_canonical(data) != value.config_identity
-                or value.config.content_identity != value.config_identity
-            ):
-                fail()
     elif type(value) is QualificationSuiteResult:
         assert isinstance(value, QualificationSuiteResult)
-        _qualification(value)
+        if value.suite_id != "ATP_V1_QUALIFICATION" or value.suite_version != "1.0":
+            fail(WebReasonCode.UNSUPPORTED_ARTIFACT_VERSION)
+        if not validate_qualification_result(value):
+            fail()
     elif type(value) is AuditJournal:
         assert isinstance(value, AuditJournal)
         if value.schema_version != EVENT_SCHEMA_VERSION:
@@ -306,23 +212,16 @@ def validate_domain(value: object, causal: object = None) -> ContentIdentity:
         assert isinstance(causal, BacktestInput)
         if value.input_identity != causal.content_identity or len(value.steps) > len(causal.steps):
             fail(WebReasonCode.WEB_STATE_INCONSISTENT)
-        if _backtest_occurred_at(value, causal) is None:
+        if backtest_causal_time(value, causal) is None:
             fail(WebReasonCode.INVALID_WEB_ARTIFACT)
     elif type(value) is AccountingReplayResult:
-        if not _valid_replay_result(value, ACCOUNTING_POLICY_V1):
+        if not validate_accounting_replay(value):
             fail()
     elif type(value) is AccountingValuation:
         assert isinstance(value, AccountingValuation)
         if value.accounting_policy_identity != ACCOUNTING_POLICY_V1.content_identity:
             fail(WebReasonCode.UNSUPPORTED_ARTIFACT_VERSION)
-        rebuilt = AccountingValuation.create(
-            **{
-                f.name: getattr(value, f.name)
-                for f in fields(value)
-                if f.name not in ("content_identity", "accounting_valuation_id")
-            }
-        )
-        if rebuilt != value:
+        if not validate_accounting_valuation(value):
             fail()
     else:
         fail(WebReasonCode.INVALID_WEB_ARTIFACT)

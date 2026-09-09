@@ -126,3 +126,34 @@ The same network guard and assertions are preserved; no qualification case is ch
 Deferred: remote exposure/authentication, listeners, persistence, polling, WebSocket,
 SSE, frontend/charting, infrastructure, configuration editing, trading controls and
 all environment/OPS mutation. No server is launched by this mission.
+
+## CTO review corrections — intrinsic integrity and public inspection
+
+Readiness and qualification suite results now retain their content identity at
+construction. Their canonical hash formula is unchanged for valid results. Inspection
+recomputes this identity independently and compares it with the retained value.
+Calling post-init on an existing object validates rather than overwrites its identity;
+it cannot silently repair a tampered object before Web pinning.
+
+Public read-only contracts now belong to the modules that own the artefacts:
+
+- `ops.inspection.validate_readiness_result`: retained identity, config/check links,
+  environment constraints and status/reason aggregation; no filesystem or startup.
+- `ops.inspection.validate_health_result`: evidence identity and status compatibility.
+- `test_qualification.inspection.validate_qualification_result`: retained suite hash,
+  canonical case links, evidence references, aggregation and run ID; no evaluation.
+- `accounting.inspection.validate_accounting_replay` and
+  `validate_accounting_valuation`: canonical identities/IDs and supported consistency
+  checks, using the owning module's existing contracts; no economic execution.
+- `backtesting.inspection.backtest_causal_time`: verified result/input link and latest
+  processed evaluation/order/fill time. Observability and Web use this same contract.
+
+Web no longer imports cross-module private implementation names or encodes OPS
+priority/Qualification aggregation. Domain policy/schema identifiers remain checked
+for Web's UNSUPPORTED_ARTIFACT_VERSION mapping.
+
+Regressions cover well-typed tampering before reference(), retained and arbitrary
+identities, nested qualification alterations, every stored artefact identity, and a
+rehashed readiness record whose config contradicts its environment. Pinning still
+adds post-composition tamper detection; neither hashing nor pinning authenticates a
+producer capable of replacing an entire consistent evidence chain.
