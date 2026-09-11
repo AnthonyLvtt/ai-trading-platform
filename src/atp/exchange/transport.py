@@ -133,8 +133,7 @@ class BinanceTestnetHTTPTransport:
         if material is None:
             return TransportReply(error=Reason.CREDENTIALS_UNAVAILABLE)
         if type(material) is not CredentialMaterial or any(
-            type(v) is not str or not v or not v.isascii() or not v.isalnum()
-            for v in (material.api_key, material.api_secret)
+            type(v) is not str or not v for v in (material.api_key, material.api_secret)
         ):
             return TransportReply(error=Reason.INVALID_CREDENTIALS)
         return self._dispatch(operation, order, at, material)

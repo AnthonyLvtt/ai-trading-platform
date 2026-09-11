@@ -415,3 +415,40 @@ def test_self_consistent_risk_with_incompatible_market_is_not_blessed():
         FakeOnlyAdapter(FakeTransport()).submit(order, **args).reason_code
         is Reason.RISK_AUTHORIZATION_INVALID
     )
+
+
+@pytest.mark.parametrize("secret", ["dummy-secret_+/=", "dummy-sécret_+/="])
+def test_non_alphanumeric_credentials_reach_auth_boundary_without_leakage(
+    monkeypatch, caplog, capsys, secret
+):
+    import atp.exchange.transport as transport_module
+
+    order, args = inputs()
+    key = "dummy-key_+/="
+    provider = EnvironmentCredentialsProvider(
+        {"ATP_BINANCE_TESTNET_API_KEY": key, "ATP_BINANCE_TESTNET_API_SECRET": secret}
+    )
+    calls = []
+
+    def local_dispatch(self, operation, received_order, at, material):
+        assert material.api_key == key and material.api_secret == secret
+        assert operation is Operation.SUBMIT and received_order == order
+        calls.append(operation)
+        # Even an authentication error containing sensitive text must not reach domain results.
+        return TransportReply(401, {"code": -2015, "msg": key + secret}, possibly_sent=True)
+
+    # Isolate credential validation only, with dispatch replaced and the socket guard active.
+    # This test patch is not part of runtime or the fake contract's environment exception.
+    monkeypatch.setattr(transport_module, "runtime_ready", lambda _: True)
+    monkeypatch.setattr(BinanceTestnetHTTPTransport, "_dispatch", local_dispatch)
+    reply = BinanceTestnetHTTPTransport(provider).perform(
+        Operation.SUBMIT, order, args["submitted_at"], None
+    )
+    assert calls == [Operation.SUBMIT] and reply.error is None
+    result = ExchangeAdapter(FakeTransport())._map(reply, order, args["submitted_at"], False)
+    assert result.status is Status.REJECTED
+    assert result.reason_code is Reason.EXCHANGE_REJECTED
+    output = capsys.readouterr()
+    visible = repr(provider) + repr(provider.load()) + repr(reply) + repr(result)
+    visible += caplog.text + output.out + output.err
+    assert key not in visible and secret not in visible
