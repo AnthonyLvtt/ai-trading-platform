@@ -250,21 +250,24 @@ class ExchangeAdapter:
                 self._known[key] = result
             return result
 
+    @staticmethod
     def _map(
-        self, reply: object, order: ExchangeOrderRequest, at: datetime, query: bool
+        reply: object, order: ExchangeOrderRequest, at: datetime, query: bool
     ) -> ExchangeSubmissionResult:
         uncertain = Status.BLOCKED if query else Status.UNCERTAIN
         if type(reply) is not TransportReply:
-            return self._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
+            return ExchangeAdapter._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
         if type(reply.possibly_sent) is not bool or (
             reply.error is not None and type(reply.error) is not Reason
         ):
-            return self._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
+            return ExchangeAdapter._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
         if reply.error is not None:
             if reply.error is Reason.MALFORMED_EXCHANGE_RESPONSE:
-                return self._result(uncertain, reply.error, order, at)
+                return ExchangeAdapter._result(uncertain, reply.error, order, at)
             if reply.possibly_sent or query:
-                return self._result(Status.UNCERTAIN, Reason.SUBMISSION_OUTCOME_UNKNOWN, order, at)
+                return ExchangeAdapter._result(
+                    Status.UNCERTAIN, Reason.SUBMISSION_OUTCOME_UNKNOWN, order, at
+                )
             reason = (
                 reply.error
                 if reply.error
@@ -275,21 +278,25 @@ class ExchangeAdapter:
                 )
                 else Reason.TRANSPORT_UNAVAILABLE
             )
-            return self._result(Status.BLOCKED, reason, order, at)
+            return ExchangeAdapter._result(Status.BLOCKED, reason, order, at)
         body, http = reply.body, reply.http_status
         if type(body) is not dict or type(http) is not int or not _json_value(body):
-            return self._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
+            return ExchangeAdapter._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
         code = body.get("code")
         if http >= 500 or code in (-1006, -1007):
-            return self._result(Status.UNCERTAIN, Reason.SUBMISSION_OUTCOME_UNKNOWN, order, at)
+            return ExchangeAdapter._result(
+                Status.UNCERTAIN, Reason.SUBMISSION_OUTCOME_UNKNOWN, order, at
+            )
         if query and http != 200:
             # Not-found is not proof of non-execution in an asynchronous exchange.
             # V1 deliberately does not use the optional controlled resubmission permission.
-            return self._result(Status.UNCERTAIN, Reason.RECONCILIATION_FAILED, order, at)
+            return ExchangeAdapter._result(
+                Status.UNCERTAIN, Reason.RECONCILIATION_FAILED, order, at
+            )
         if 400 <= http < 500 and type(code) is int and code < 0:
-            return self._result(Status.REJECTED, Reason.EXCHANGE_REJECTED, order, at)
+            return ExchangeAdapter._result(Status.REJECTED, Reason.EXCHANGE_REJECTED, order, at)
         if http != 200:
-            return self._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
+            return ExchangeAdapter._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
         timestamp = body.get("updateTime") if query else body.get("transactTime")
         quantity = body.get("origQty")
         try:
@@ -313,12 +320,12 @@ class ExchangeAdapter:
             or body.get("status")
             not in ("NEW", "PARTIALLY_FILLED", "FILLED", "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH")
         ):
-            return self._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
+            return ExchangeAdapter._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
         try:
             event_time = datetime.fromtimestamp(timestamp / 1000, UTC)
         except (ValueError, OverflowError, OSError):
-            return self._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
-        return self._result(
+            return ExchangeAdapter._result(uncertain, Reason.MALFORMED_EXCHANGE_RESPONSE, order, at)
+        return ExchangeAdapter._result(
             Status.ACCEPTED, Reason.EXCHANGE_OK, order, at, str(body["orderId"]), event_time
         )
 
