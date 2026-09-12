@@ -1,0 +1,43 @@
+name: Release candidate
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Explicit release label
+        required: true
+        type: string
+      source_commit:
+        description: Exact current main commit SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  candidate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Verify requested source
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: uv lock --check
+      - run: uv sync --dev --frozen
+      - name: Build and qualify exact source
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: uv run --frozen python scripts/release.py --source-commit "$SOURCE_COMMIT" --version "$RELEASE_VERSION" --output "$RUNNER_TEMP/atp-release"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: atp-release-candidate
+          path: ${{ runner.temp }}/atp-release/
+          if-no-files-found: error

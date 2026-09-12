@@ -1,1 +1,56 @@
-"""Release and deployment boundary."""
+"""Local release proofs and deployment; never trading authorization."""
+
+from atp.release_deployment.deployment import deploy, plan_deployment
+from atp.release_deployment.engine import create_candidate, inspect_bundle, promote
+from atp.release_deployment.model import (
+    BuildEvidence,
+    CandidateResult,
+    DeploymentPlan,
+    DeploymentResult,
+    DeploymentStatus,
+    EvidenceType,
+    InstallMode,
+    PlanResult,
+    PromotionDecision,
+    PromotionStatus,
+    QualificationProof,
+    Reason,
+    ReleaseBundle,
+    ReleaseCandidate,
+    ReleaseEvidence,
+    ReleaseManifest,
+    ReleasePolicy,
+    ReleaseStatus,
+    SourceTree,
+    Target,
+    ValidationEvidence,
+)
+
+__all__ = [
+    "deploy",
+    "plan_deployment",
+    "create_candidate",
+    "inspect_bundle",
+    "promote",
+    "BuildEvidence",
+    "CandidateResult",
+    "DeploymentPlan",
+    "DeploymentResult",
+    "DeploymentStatus",
+    "EvidenceType",
+    "InstallMode",
+    "PlanResult",
+    "PromotionDecision",
+    "PromotionStatus",
+    "QualificationProof",
+    "Reason",
+    "ReleaseBundle",
+    "ReleaseCandidate",
+    "ReleaseEvidence",
+    "ReleaseManifest",
+    "ReleasePolicy",
+    "ReleaseStatus",
+    "SourceTree",
+    "Target",
+    "ValidationEvidence",
+]

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from atp.shared.identity import ContentIdentity
+from atp.release_deployment.source import inspect_source
 from atp.shared.serialization import canonical_json_bytes
 from atp.test_qualification import (
     CASES_V1,
@@ -141,10 +141,11 @@ class Reports:
         self.phases.setdefault(report.nodeid, {})[report.when] = report.outcome
 
 
-def main():
+def collect(*, output_path=None):
     root = Path(__file__).resolve().parents[1]
     if Path.cwd() != root:
         raise SystemExit("Run from the repository root")
+    source_before = inspect_source(root)
     reports = Reports()
     exit_code = pytest.main(
         ["tests/unit", "tests/contract", "tests/qualification", "-q"], plugins=[reports]
@@ -156,17 +157,10 @@ def main():
         "types_pass": ["uv", "run", "mypy", "src"],
     }.items():
         command_codes[name] = subprocess.run(args, capture_output=True, check=False).returncode
-    repository_identity = ContentIdentity.from_canonical(
-        {
-            str(p): str(ContentIdentity.from_bytes(p.read_bytes()))
-            for directory in ("src", "tests", "scripts")
-            for p in sorted(Path(directory).rglob("*.py"))
-        }
-        | {
-            name: str(ContentIdentity.from_bytes(Path(name).read_bytes()))
-            for name in ("pyproject.toml", "uv.lock", "Makefile")
-        }
-    )
+    source_after = inspect_source(root)
+    if source_before != source_after:
+        raise SystemExit("QUALIFICATION_SOURCE_MISMATCH")
+    repository_identity = source_after.repository_identity
     subjects, evidence = [], []
     for case in CASES_V1:
         observations, references = {}, {}
@@ -236,6 +230,7 @@ def main():
                     "observations": observations,
                     "references": references,
                     "repository_identity": str(repository_identity),
+                    "source_commit_sha": source_after.source_commit_sha,
                 }
             ),
         )
@@ -282,7 +277,13 @@ def main():
             for s in subjects
         ],
     }
-    Path("eng-test-001-qualification.json").write_bytes(canonical_json_bytes(output))
+    destination = Path("eng-test-001-qualification.json") if output_path is None else output_path
+    destination.write_bytes(canonical_json_bytes(output))
+    return result, tuple(subjects), tuple(evidence), source_after
+
+
+def main():
+    result, _, _, _ = collect()
     print(result.status.value, result.qualification_run_id)
     return 0 if result.status.value == "PASSED" else 1
 
