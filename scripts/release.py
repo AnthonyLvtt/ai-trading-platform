@@ -49,6 +49,14 @@ def run(root: Path, version: str, output: Path, commit: str) -> int:
             raise ReleaseError(Reason.DIRTY_WORKTREE)
         if before.lockfile_identity is None:
             raise ReleaseError(Reason.LOCKFILE_MISMATCH)
+        lock_check = subprocess.run(
+            ["uv", "lock", "--check"],
+            cwd=root,
+            capture_output=True,
+            check=False,
+        )
+        if lock_check.returncode:
+            raise ReleaseError(Reason.LOCKFILE_MISMATCH)
         destination = output.resolve()
         if destination == root or root in destination.parents or destination.exists():
             raise ReleaseError(Reason.DEPLOYMENT_PLAN_INVALID)
@@ -88,7 +96,13 @@ def run(root: Path, version: str, output: Path, commit: str) -> int:
             artifact = wheels[0]
             wheel = artifact.read_bytes()
             ve = ValidationEvidence(
-                commit, before.repository_identity, before.lockfile_identity, True, True, True, True
+                commit,
+                before.repository_identity,
+                before.lockfile_identity,
+                True,
+                True,
+                True,
+                lock_check.returncode == 0,
             )
             be = BuildEvidence(
                 commit,
