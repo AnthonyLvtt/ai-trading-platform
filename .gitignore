@@ -23,5 +23,6 @@ build/
 /data/
 /datasets/
 /artifacts/
+/runtime/private/
 *.parquet
 *.duckdb

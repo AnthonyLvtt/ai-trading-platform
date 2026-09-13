@@ -28,6 +28,8 @@ class Reason(StrEnum):
     RELEASE_BINDING_MISMATCH = "RELEASE_BINDING_MISMATCH"
     CREDENTIAL_CAPABILITY_REQUIRED = "CREDENTIAL_CAPABILITY_REQUIRED"
     CREDENTIAL_CAPABILITY_INVALID = "CREDENTIAL_CAPABILITY_INVALID"
+    CREDENTIAL_REFERENCE_MISMATCH = "CREDENTIAL_REFERENCE_MISMATCH"
+    CREDENTIAL_CAPABILITY_UNTRUSTED = "CREDENTIAL_CAPABILITY_UNTRUSTED"
     RECONCILIATION_NOT_READY = "RECONCILIATION_NOT_READY"
     SYMBOL_NOT_AUTHORIZED = "SYMBOL_NOT_AUTHORIZED"
     ORDER_TYPE_NOT_AUTHORIZED = "ORDER_TYPE_NOT_AUTHORIZED"
@@ -199,6 +201,10 @@ class TrustedCredentialCapabilityEvidence(Record):
     authority_reference: str
     environment: str = "TESTNET"
     authority_type: str = "TRUSTED_COMPOSITION_ATTESTATION"
+    credential_reference_id: str | None = None
+    permission_attestation_identity: ContentIdentity | None = None
+    permission_verified_at: datetime | None = None
+    permission_valid_until: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
