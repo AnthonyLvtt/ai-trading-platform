@@ -453,7 +453,7 @@ def test_tq_runtime_matrices_unchanged(tmp_path, scenario):
 
     (tmp_path / "artifacts").mkdir()
     ops = readiness(config(tmp_path, "TESTNET"), observability=observability_evidence())
-    assert ops.reason_code.value == "TESTNET_NOT_AUTHORIZED"
+    assert ops.reason_code.value == "ACTIVATION_GRANT_REQUIRED"
     for environment in ("TESTNET", "LIVE"):
         risk = DeterministicRiskEngine(policy()).evaluate(
             RiskEvaluationContext(

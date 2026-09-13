@@ -48,9 +48,14 @@ def plan_deployment(
     local_target_path: object,
     install_mode: object = InstallMode.COPY_ARTIFACT,
     auto_start: object = False,
+    *,
+    runtime_authorization: object = None,
+    at: object = None,
 ) -> PlanResult:
     try:
-        decision = promote(bundle, wheel, target)
+        decision = promote(
+            bundle, wheel, target, runtime_authorization=runtime_authorization, at=at
+        )
         if decision.status is not PromotionStatus.ALLOWED:
             return PlanResult(decision.reason_code, None)
         if type(install_mode) is not InstallMode or auto_start is not False:
@@ -76,7 +81,14 @@ def plan_deployment(
         )
 
 
-def deploy(bundle: object, wheel: object, plan: object) -> DeploymentResult:
+def deploy(
+    bundle: object,
+    wheel: object,
+    plan: object,
+    *,
+    runtime_authorization: object = None,
+    at: object = None,
+) -> DeploymentResult:
     try:
         verify(plan, DeploymentPlan)
         assert isinstance(plan, DeploymentPlan)
@@ -87,6 +99,8 @@ def deploy(bundle: object, wheel: object, plan: object) -> DeploymentResult:
             plan.local_target_path,
             plan.install_mode,
             plan.auto_start,
+            runtime_authorization=runtime_authorization,
+            at=at,
         )
         if rebuilt.plan is None:
             raise ReleaseError(rebuilt.reason_code)

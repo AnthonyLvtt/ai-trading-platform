@@ -438,7 +438,19 @@ def test_corrupted_snapshot_and_position_state_are_blocked() -> None:
 def test_result_is_structural_without_quantity_or_financial_metrics() -> None:
     data = snapshot()
     result = replay(data, replay_step(data, 3, empty_portfolio()))
-    rendered = repr(result).lower()
+    # Inspect model field names, not hex digests which can coincidentally contain "fee".
+    from dataclasses import fields, is_dataclass
+
+    def names(value):
+        if is_dataclass(value):
+            return [f.name for f in fields(value)] + [
+                n for f in fields(value) for n in names(getattr(value, f.name))
+            ]
+        if isinstance(value, tuple):
+            return [n for v in value for n in names(v)]
+        return []
+
+    rendered = " ".join(names(result)).lower()
 
     assert result.number_of_risk_approved == 1
     assert result.number_of_risk_rejected == result.number_of_risk_blocked == 0

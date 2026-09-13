@@ -30,6 +30,7 @@ from atp.strategy.model import (
     StrategyEvaluation,
     StrategySignal,
 )
+from atp.testnet_activation.contracts import RuntimeAuthorizationContext, context_error
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +38,7 @@ class RiskEvaluationContext:
     strategy_evaluation: StrategyEvaluation | None
     market_context: RiskMarketContext | None
     portfolio_state: PortfolioState | None
+    runtime_authorization: RuntimeAuthorizationContext | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +139,16 @@ class DeterministicRiskEngine:
                 RiskReasonCode.MARKET_CONTEXT_INCOMPLETE,
                 context,
             )
-        if environment not in self.policy.allowed_environments:
+        if environment not in self.policy.allowed_environments and not (
+            environment is Environment.TESTNET
+            and context_error(
+                context.runtime_authorization,
+                evaluation.provenance.evaluation_time.value,
+                symbol=market.symbol,
+                order_type="MARKET",
+            )
+            is None
+        ):
             return self._result(
                 RiskStatus.BLOCKED,
                 RiskReasonCode.ENVIRONMENT_NOT_ACTIVE,
@@ -344,6 +355,16 @@ def _provenance(policy: RiskPolicy, context: RiskEvaluationContext) -> RiskProve
         market_context=market,
         market_context_identity=_runtime_evidence_identity("market_context", raw_market),
         portfolio_state_identity=_runtime_evidence_identity("portfolio_state", raw_portfolio),
+        runtime_authorization_identity=(
+            context.runtime_authorization.content_identity
+            if isinstance(context.runtime_authorization, RuntimeAuthorizationContext)
+            and context_error(
+                context.runtime_authorization,
+                strategy_provenance.evaluation_time.value if strategy_provenance else None,
+            )
+            is None
+            else None
+        ),
     )
 
 

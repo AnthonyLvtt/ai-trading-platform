@@ -38,10 +38,34 @@ from atp.test_qualification.inspection import validate_qualification_result
 from atp.test_qualification.model import (
     QualificationStatus,
 )
+from atp.testnet_activation.contracts import RuntimeAuthorizationContext, context_error
 
 _ERRORS = (ValueError, TypeError, AttributeError, KeyError, RecursionError)
 _PRIORITY = (
     Reason.LIVE_FORBIDDEN,
+    Reason.TESTNET_ACTIVATION_ALLOWED,
+    Reason.ACTIVATION_GRANT_REQUIRED,
+    Reason.ACTIVATION_GRANT_INVALID,
+    Reason.ACTIVATION_GRANT_UNTRUSTED,
+    Reason.ACTIVATION_GRANT_EXPIRED,
+    Reason.ACTIVATION_GRANT_NOT_YET_VALID,
+    Reason.ACTIVATION_SOURCE_MISMATCH,
+    Reason.TESTNET_QUALIFICATION_REQUIRED,
+    Reason.TESTNET_QUALIFICATION_INVALID,
+    Reason.TESTNET_QUALIFICATION_MISMATCH,
+    Reason.RELEASE_BINDING_REQUIRED,
+    Reason.RELEASE_BINDING_MISMATCH,
+    Reason.CREDENTIAL_CAPABILITY_REQUIRED,
+    Reason.CREDENTIAL_CAPABILITY_INVALID,
+    Reason.RECONCILIATION_NOT_READY,
+    Reason.SYMBOL_NOT_AUTHORIZED,
+    Reason.ORDER_TYPE_NOT_AUTHORIZED,
+    Reason.RISK_NOT_AUTHORIZED,
+    Reason.OPS_NOT_READY,
+    Reason.RELEASE_NOT_PROMOTED,
+    Reason.TESTNET_RUNTIME_BLOCKED,
+    Reason.WITHDRAWAL_CAPABILITY_FORBIDDEN,
+    Reason.INVALID_ACTIVATION_INPUT,
     Reason.TESTNET_NOT_AUTHORIZED,
     Reason.ENVIRONMENT_INACTIVE,
     Reason.UNKNOWN_ENVIRONMENT,
@@ -183,6 +207,8 @@ def health(value: object) -> HealthStatus:
 def readiness(
     config: object,
     *,
+    runtime_authorization: object = None,
+    at: object = None,
     qualification: object = None,
     observability: object = None,
     filesystem: FilesystemBoundary | None = None,
@@ -248,7 +274,14 @@ def readiness(
                 or raw["ops_policy_id"] != "ATP_OPS_V1"
                 or raw["ops_policy_version"] != "1.0"
                 or raw["qualification_required"]
-                != (env in (OperationalEnvironment.BACKTEST, OperationalEnvironment.SIMULATION))
+                != (
+                    env
+                    in (
+                        OperationalEnvironment.BACKTEST,
+                        OperationalEnvironment.SIMULATION,
+                        OperationalEnvironment.TESTNET,
+                    )
+                )
             )
         ):
             reasons[StartupCheck.CONFIG_VALID] = Reason.INVALID_OPERATIONAL_CONFIG
@@ -332,8 +365,25 @@ def readiness(
             OperationalEnvironment.TESTNET: Reason.TESTNET_NOT_AUTHORIZED,
             OperationalEnvironment.DRY_RUN: Reason.ENVIRONMENT_INACTIVE,
         }.get(env)
+    activation_id = None
+    if env is OperationalEnvironment.TESTNET:
+        activation_error = context_error(runtime_authorization, at)
+        reasons[StartupCheck.TESTNET_ACTIVATION_AUTHORIZED] = (
+            Reason(activation_error.value) if activation_error else None
+        )
+        reasons[StartupCheck.ENVIRONMENT_ACTIVE] = None
+        if activation_error is None:
+            assert isinstance(runtime_authorization, RuntimeAuthorizationContext)
+            activation_id = runtime_authorization.content_identity
+            references[StartupCheck.TESTNET_ACTIVATION_AUTHORIZED] = activation_id
+    else:
+        reasons[StartupCheck.TESTNET_ACTIVATION_AUTHORIZED] = Reason.NOT_REQUIRED
     qualification_id = None
-    if env in (OperationalEnvironment.BACKTEST, OperationalEnvironment.SIMULATION):
+    if env in (
+        OperationalEnvironment.BACKTEST,
+        OperationalEnvironment.SIMULATION,
+        OperationalEnvironment.TESTNET,
+    ):
         if qualification is None:
             reasons[StartupCheck.QUALIFICATION_VALID] = Reason.QUALIFICATION_REQUIRED
         elif not _qualification(qualification):
@@ -346,6 +396,10 @@ def readiness(
         reasons[StartupCheck.QUALIFICATION_VALID] = Reason.NOT_REQUIRED
     else:
         reasons[StartupCheck.QUALIFICATION_VALID] = Reason.STARTUP_CHECK_FAILED
+    if activation_id is not None:
+        assert isinstance(runtime_authorization, RuntimeAuthorizationContext)
+        if qualification_id != runtime_authorization.qualification_identity:
+            reasons[StartupCheck.QUALIFICATION_VALID] = Reason.QUALIFICATION_INVALID
     obs_id = None
     if observability is None:
         reasons[StartupCheck.OBSERVABILITY_AVAILABLE] = Reason.OBSERVABILITY_UNAVAILABLE
@@ -377,6 +431,7 @@ def readiness(
         qualification_id,
         obs_id,
         None if reasons[StartupCheck.NO_FORBIDDEN_CREDENTIAL_MATERIAL] else canonical,
+        activation_id,
     )
 
 

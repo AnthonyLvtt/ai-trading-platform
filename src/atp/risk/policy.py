@@ -38,6 +38,7 @@ class RiskPolicy:
                 environment.value for environment in self.allowed_environments
             ),
             "instrument_class": "SPOT",
+            "conditional_testnet_policy": "ATP_TESTNET_ACTIVATION_V1/1.0",
             "leverage": "1",
             "long_only": True,
             "margin_enabled": False,

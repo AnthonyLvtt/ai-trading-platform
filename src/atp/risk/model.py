@@ -178,6 +178,7 @@ class RiskProvenance:
     market_context: RiskMarketContext | None
     market_context_identity: ContentIdentity | None
     portfolio_state_identity: ContentIdentity | None
+    runtime_authorization_identity: ContentIdentity | None = None
 
     def canonical_value(self) -> dict[str, object]:
         return {
@@ -187,6 +188,9 @@ class RiskProvenance:
             else self.market_context.canonical_value(),
             "market_context_identity": _optional_identity(self.market_context_identity),
             "portfolio_state_identity": _optional_identity(self.portfolio_state_identity),
+            "runtime_authorization_identity": _optional_identity(
+                self.runtime_authorization_identity
+            ),
             "risk_policy_id": str(self.risk_policy_id),
             "risk_policy_identity": str(self.risk_policy_identity),
             "risk_policy_version": self.risk_policy_version,

@@ -21,7 +21,7 @@ def test_source_qualification_wheel_to_local_deployment(inputs, tmp_path):  # no
     assert deployed.status is DeploymentStatus.COMPLETED
     assert deployed.process_started is False
     for target, reason in [
-        (Target.TESTNET, Reason.TESTNET_NOT_AUTHORIZED),
+        (Target.TESTNET, Reason.ACTIVATION_GRANT_REQUIRED),
         (Target.LIVE, Reason.LIVE_FORBIDDEN),
     ]:
         assert promote(result.bundle, inputs[4], target).reason_code is reason

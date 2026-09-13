@@ -38,7 +38,7 @@ def config(workspace, environment="LOCAL"):
         artifacts_path=str(workspace / "artifacts"),
         observability_enabled=True,
         deterministic_mode=True,
-        qualification_required=environment in ("BACKTEST", "SIMULATION"),
+        qualification_required=environment in ("BACKTEST", "SIMULATION", "TESTNET"),
         ops_policy_id="ATP_OPS_V1",
         ops_policy_version="1.0",
     )
@@ -64,7 +64,7 @@ def test_authorized_modes_are_ready(workspace, environment):
         observability=observability_evidence(),
     )
     assert result.readiness_status is ReadinessStatus.READY
-    assert len(result.startup_checks) == 9
+    assert len(result.startup_checks) == 10
     assert all(c.critical and c.status is CheckStatus.PASSED for c in result.startup_checks)
     conditional = next(
         c for c in result.startup_checks if c.check is StartupCheck.QUALIFICATION_VALID
@@ -76,7 +76,7 @@ def test_authorized_modes_are_ready(workspace, environment):
     "environment,reason",
     [
         ("LIVE", Reason.LIVE_FORBIDDEN),
-        ("TESTNET", Reason.TESTNET_NOT_AUTHORIZED),
+        ("TESTNET", Reason.ACTIVATION_GRANT_REQUIRED),
         ("DRY_RUN", Reason.ENVIRONMENT_INACTIVE),
         ("unknown", Reason.UNKNOWN_ENVIRONMENT),
     ],

@@ -68,7 +68,7 @@ def test_fake_exception_cannot_use_http_transport():
     assert FakeOnlyAdapter(http).submit(order, **args).reason_code is Reason.TESTNET_NOT_AUTHORIZED
     assert (
         http.perform(Operation.SUBMIT, order, args["submitted_at"], None).error
-        is Reason.TESTNET_NOT_AUTHORIZED
+        is Reason.TESTNET_RUNTIME_BLOCKED
     )
 
 
@@ -432,7 +432,7 @@ def test_non_alphanumeric_credentials_reach_auth_boundary_without_leakage(
 
     def local_dispatch(self, operation, received_order, at, material):
         assert material.api_key == key and material.api_secret == secret
-        assert operation is Operation.SUBMIT and received_order == order
+        assert operation is Operation.QUERY and received_order == order
         calls.append(operation)
         # Even an authentication error containing sensitive text must not reach domain results.
         return TransportReply(401, {"code": -2015, "msg": key + secret}, possibly_sent=True)
@@ -442,9 +442,9 @@ def test_non_alphanumeric_credentials_reach_auth_boundary_without_leakage(
     monkeypatch.setattr(transport_module, "runtime_ready", lambda _: True)
     monkeypatch.setattr(BinanceTestnetHTTPTransport, "_dispatch", local_dispatch)
     reply = BinanceTestnetHTTPTransport(provider).perform(
-        Operation.SUBMIT, order, args["submitted_at"], None
+        Operation.QUERY, order, args["submitted_at"], None
     )
-    assert calls == [Operation.SUBMIT] and reply.error is None
+    assert calls == [Operation.QUERY] and reply.error is None
     result = ExchangeAdapter(FakeTransport())._map(reply, order, args["submitted_at"], False)
     assert result.status is Status.REJECTED
     assert result.reason_code is Reason.EXCHANGE_REJECTED

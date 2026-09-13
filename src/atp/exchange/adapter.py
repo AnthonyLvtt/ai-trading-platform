@@ -99,7 +99,7 @@ def _order_error(
 
 
 def authorize_testnet(readiness: object) -> TestnetExecutionAuthorization | None:
-    """Runtime factory. Current OPS policy cannot produce this authorization."""
+    """Read-only compatibility evidence; it never unlocks the economic submit barrier."""
     if not runtime_ready(readiness):
         return None
     assert isinstance(readiness, OperationalReadinessResult)
@@ -172,7 +172,7 @@ class ExchangeAdapter:
         expected = authorize_testnet(readiness)
         if expected is None or authorization != expected:
             return Reason.TESTNET_NOT_AUTHORIZED
-        return None
+        return Reason.TESTNET_RUNTIME_BLOCKED
 
     def submit(
         self,
