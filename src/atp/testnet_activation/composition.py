@@ -33,6 +33,14 @@ class TrustedActivationAuthority(ABC):
     def attest(self, grant: TestnetActivationGrant) -> TrustedActivationGrantEvidence: ...
 
 
+class CredentialCapabilityUnavailable(ValueError):
+    """Sanitized, typed refusal from the credential composition boundary."""
+
+    def __init__(self, reason: Reason) -> None:
+        self.reason = reason
+        super().__init__(reason.value)
+
+
 class CredentialCapabilityAuthority(ABC):
     """Receives an opaque source identity, never secret material."""
 
@@ -149,7 +157,10 @@ def validate_activation(
         return block(Reason.CREDENTIAL_CAPABILITY_REQUIRED)
     if not isinstance(credential_authority, CredentialCapabilityAuthority):
         return block(Reason.CREDENTIAL_CAPABILITY_INVALID)
-    capabilities = credential_authority.attest(credential_source_identity)
+    try:
+        capabilities = credential_authority.attest(credential_source_identity)
+    except CredentialCapabilityUnavailable as error:
+        return block(error.reason)
     if not valid(capabilities, TrustedCredentialCapabilityEvidence):
         return block(Reason.CREDENTIAL_CAPABILITY_INVALID)
     if capabilities.withdrawal_capability_absent is False:
@@ -170,6 +181,18 @@ def validate_activation(
         )
     ):
         return block(Reason.CREDENTIAL_CAPABILITY_INVALID)
+    context_start = grant.validity_start
+    context_end = grant.validity_end
+    if capabilities.permission_attestation_identity is not None:
+        if (
+            not capabilities.credential_reference_id
+            or capabilities.permission_verified_at is None
+            or capabilities.permission_valid_until is None
+            or not capabilities.permission_verified_at <= at < capabilities.permission_valid_until
+        ):
+            return block(Reason.CREDENTIAL_CAPABILITY_INVALID)
+        context_start = max(context_start, capabilities.permission_verified_at)
+        context_end = min(context_end, capabilities.permission_valid_until)
     assert isinstance(symbol, str) and isinstance(order_type, str)
     context = RuntimeAuthorizationContext(
         "TESTNET",
@@ -187,8 +210,8 @@ def validate_activation(
         release.qualification.result.content_identity,
         symbol,
         order_type,
-        grant.validity_start,
-        grant.validity_end,
+        context_start,
+        context_end,
         p.content_identity,
     )
     return ActivationResult(Reason.TESTNET_ACTIVATION_ALLOWED, _seal_context(context))
