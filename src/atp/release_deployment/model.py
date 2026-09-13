@@ -21,6 +21,29 @@ from atp.test_qualification.model import (
 
 
 class Reason(StrEnum):
+    INVALID_ACTIVATION_INPUT = "INVALID_ACTIVATION_INPUT"
+    WITHDRAWAL_CAPABILITY_FORBIDDEN = "WITHDRAWAL_CAPABILITY_FORBIDDEN"
+    TESTNET_RUNTIME_BLOCKED = "TESTNET_RUNTIME_BLOCKED"
+    RELEASE_NOT_PROMOTED = "RELEASE_NOT_PROMOTED"
+    OPS_NOT_READY = "OPS_NOT_READY"
+    RISK_NOT_AUTHORIZED = "RISK_NOT_AUTHORIZED"
+    ORDER_TYPE_NOT_AUTHORIZED = "ORDER_TYPE_NOT_AUTHORIZED"
+    SYMBOL_NOT_AUTHORIZED = "SYMBOL_NOT_AUTHORIZED"
+    RECONCILIATION_NOT_READY = "RECONCILIATION_NOT_READY"
+    CREDENTIAL_CAPABILITY_INVALID = "CREDENTIAL_CAPABILITY_INVALID"
+    CREDENTIAL_CAPABILITY_REQUIRED = "CREDENTIAL_CAPABILITY_REQUIRED"
+    RELEASE_BINDING_MISMATCH = "RELEASE_BINDING_MISMATCH"
+    RELEASE_BINDING_REQUIRED = "RELEASE_BINDING_REQUIRED"
+    TESTNET_QUALIFICATION_MISMATCH = "TESTNET_QUALIFICATION_MISMATCH"
+    TESTNET_QUALIFICATION_INVALID = "TESTNET_QUALIFICATION_INVALID"
+    TESTNET_QUALIFICATION_REQUIRED = "TESTNET_QUALIFICATION_REQUIRED"
+    ACTIVATION_SOURCE_MISMATCH = "ACTIVATION_SOURCE_MISMATCH"
+    ACTIVATION_GRANT_NOT_YET_VALID = "ACTIVATION_GRANT_NOT_YET_VALID"
+    ACTIVATION_GRANT_EXPIRED = "ACTIVATION_GRANT_EXPIRED"
+    ACTIVATION_GRANT_UNTRUSTED = "ACTIVATION_GRANT_UNTRUSTED"
+    ACTIVATION_GRANT_INVALID = "ACTIVATION_GRANT_INVALID"
+    ACTIVATION_GRANT_REQUIRED = "ACTIVATION_GRANT_REQUIRED"
+    TESTNET_ACTIVATION_ALLOWED = "TESTNET_ACTIVATION_ALLOWED"
     RELEASE_READY = "RELEASE_READY"
     PROMOTION_ALLOWED = "PROMOTION_ALLOWED"
     DIRTY_WORKTREE = "DIRTY_WORKTREE"
@@ -81,7 +104,8 @@ class EvidenceType(StrEnum):
 
 
 ALLOWED = (Target.LOCAL, Target.TEST, Target.BACKTEST, Target.SIMULATION)
-FORBIDDEN = (Target.DRY_RUN, Target.TESTNET, Target.LIVE)
+FORBIDDEN = (Target.DRY_RUN, Target.LIVE)
+CONDITIONAL = (Target.TESTNET,)
 
 
 class ReleaseError(ValueError):
@@ -199,6 +223,7 @@ class ReleasePolicy(Record):
     qualification_required: bool = True
     remote_deployment_allowed: bool = False
     testnet_promotion_allowed: bool = False
+    conditional_testnet_policy: str = "ATP_TESTNET_ACTIVATION_V1/1.0"
     live_promotion_allowed: bool = False
     auto_start_allowed: bool = False
     network_deployment_required: bool = False
@@ -315,6 +340,8 @@ class ReleaseManifest(Record):
         assert isinstance(data, dict)
         return canonical_json_bytes(data | {"content_identity": str(self.content_identity)})
 
+    conditional_promotion_targets: tuple[Target, ...] = CONDITIONAL
+
 
 @dataclass(frozen=True, slots=True)
 class ReleaseBundle(Record):
@@ -342,6 +369,7 @@ class PromotionDecision(Record):
     release_candidate_identity: ContentIdentity | None
     manifest_identity: ContentIdentity | None
     policy_identity: ContentIdentity
+    runtime_authorization_identity: ContentIdentity | None = None
 
 
 @dataclass(frozen=True, slots=True)

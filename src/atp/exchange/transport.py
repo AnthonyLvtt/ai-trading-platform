@@ -119,6 +119,9 @@ class BinanceTestnetHTTPTransport:
         at: datetime,
         readiness: object,
     ) -> TransportReply:
+        # The new conditional OPS gate must never unlock the signed economic transport.
+        if operation is Operation.SUBMIT:
+            return TransportReply(error=Reason.TESTNET_RUNTIME_BLOCKED)
         # Defense in depth: even a test harness cannot activate this HTTP transport.
         if not runtime_ready(readiness):
             return TransportReply(error=Reason.TESTNET_NOT_AUTHORIZED)

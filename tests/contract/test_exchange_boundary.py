@@ -147,7 +147,7 @@ def test_real_data_strategy_risk_to_fake_exchange(tmp_path, monkeypatch) -> None
 
     (tmp_path / "artifacts").mkdir()
     ops = readiness(config(tmp_path, "TESTNET"), observability=observability_evidence())
-    assert ops.reason_code.value == "TESTNET_NOT_AUTHORIZED"
+    assert ops.reason_code.value == "ACTIVATION_GRANT_REQUIRED"
     assert authorize_testnet(ops) is None
     risk_testnet = engine.evaluate(
         RiskEvaluationContext(

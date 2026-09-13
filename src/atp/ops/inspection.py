@@ -20,6 +20,7 @@ from atp.ops.model import (
     OperationalReasonCode as Reason,
 )
 from atp.shared.errors import ValidationError
+from atp.testnet_activation.contracts import inspect_context_reference
 
 
 def validate_health_result(status: object, evidence: object) -> bool:
@@ -91,7 +92,6 @@ def validate_readiness_result(value: object) -> bool:
             return False
         inactive = {
             OperationalEnvironment.LIVE: Reason.LIVE_FORBIDDEN,
-            OperationalEnvironment.TESTNET: Reason.TESTNET_NOT_AUTHORIZED,
             OperationalEnvironment.DRY_RUN: Reason.ENVIRONMENT_INACTIVE,
         }
         if value.environment in inactive and value.reason_code is not inactive[value.environment]:
@@ -112,14 +112,38 @@ def validate_readiness_result(value: object) -> bool:
                 OperationalEnvironment.TEST,
                 OperationalEnvironment.BACKTEST,
                 OperationalEnvironment.SIMULATION,
+                OperationalEnvironment.TESTNET,
             ):
                 return False
             if value.config is None or value.observability_evidence_identity is None:
                 return False
             if (
                 value.environment
-                in (OperationalEnvironment.BACKTEST, OperationalEnvironment.SIMULATION)
+                in (
+                    OperationalEnvironment.BACKTEST,
+                    OperationalEnvironment.SIMULATION,
+                    OperationalEnvironment.TESTNET,
+                )
                 and value.qualification_result_identity is None
+            ):
+                return False
+        activation_check = checks[StartupCheck.TESTNET_ACTIVATION_AUTHORIZED]
+        if activation_check.evidence_identity != value.runtime_authorization_identity:
+            return False
+        if (
+            value.environment is OperationalEnvironment.TESTNET
+            and value.readiness_status is ReadinessStatus.READY
+            and value.runtime_authorization_identity is None
+        ):
+            return False
+        if (
+            value.environment is OperationalEnvironment.TESTNET
+            and value.readiness_status is ReadinessStatus.READY
+        ):
+            context = inspect_context_reference(value.runtime_authorization_identity)
+            if (
+                context is None
+                or context.qualification_identity != value.qualification_result_identity
             ):
                 return False
         if value.config is not None:

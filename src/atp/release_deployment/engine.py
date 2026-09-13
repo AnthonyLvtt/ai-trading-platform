@@ -38,6 +38,7 @@ from atp.shared.identity import ContentIdentity
 from atp.test_qualification import CASES_V1, SUITE_V1, evaluate_suite
 from atp.test_qualification.inspection import validate_qualification_result
 from atp.test_qualification.model import QualificationStatus
+from atp.testnet_activation.contracts import RuntimeAuthorizationContext, context_error
 
 
 def inspect_wheel(name: str, data: bytes) -> str:
@@ -268,19 +269,38 @@ def inspect_bundle(bundle: object, wheel: object, policy: object = None) -> Reas
 
 
 def promote(
-    bundle: object, wheel: object, target: object, policy: object = None
+    bundle: object,
+    wheel: object,
+    target: object,
+    policy: object = None,
+    *,
+    runtime_authorization: object = None,
+    at: object = None,
 ) -> PromotionDecision:
     p = ReleasePolicy()
     selected = target if type(target) is Target else None
     reason = (
         {
             Target.LIVE: Reason.LIVE_FORBIDDEN,
-            Target.TESTNET: Reason.TESTNET_NOT_AUTHORIZED,
             Target.DRY_RUN: Reason.PROMOTION_TARGET_FORBIDDEN,
         }.get(selected)
         if selected is not None
         else None
     )
+    activation_id = None
+    if selected is Target.TESTNET:
+        error = context_error(runtime_authorization, at)
+        reason = Reason(error.value) if error else None
+        if error is None:
+            assert isinstance(runtime_authorization, RuntimeAuthorizationContext)
+            activation_id = runtime_authorization.content_identity
+            if (
+                type(bundle) is not ReleaseBundle
+                or bundle.candidate.content_identity != runtime_authorization.release_identity
+                or bundle.manifest.content_identity
+                != runtime_authorization.release_manifest_identity
+            ):
+                reason = Reason.RELEASE_BINDING_MISMATCH
     if selected is None:
         reason = Reason.PROMOTION_TARGET_FORBIDDEN
     if reason is None:
@@ -295,4 +315,5 @@ def promote(
         None if c is None else c.content_identity,
         None if m is None else m.content_identity,
         p.content_identity,
+        activation_id,
     )

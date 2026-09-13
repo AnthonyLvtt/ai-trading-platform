@@ -31,6 +31,7 @@ class CheckStatus(StrEnum):
 
 
 class StartupCheck(StrEnum):
+    TESTNET_ACTIVATION_AUTHORIZED = "TESTNET_ACTIVATION_AUTHORIZED"
     ENVIRONMENT_KNOWN = "ENVIRONMENT_KNOWN"
     ENVIRONMENT_ACTIVE = "ENVIRONMENT_ACTIVE"
     CONFIG_VALID = "CONFIG_VALID"
@@ -43,6 +44,29 @@ class StartupCheck(StrEnum):
 
 
 class OperationalReasonCode(StrEnum):
+    INVALID_ACTIVATION_INPUT = "INVALID_ACTIVATION_INPUT"
+    WITHDRAWAL_CAPABILITY_FORBIDDEN = "WITHDRAWAL_CAPABILITY_FORBIDDEN"
+    TESTNET_RUNTIME_BLOCKED = "TESTNET_RUNTIME_BLOCKED"
+    RELEASE_NOT_PROMOTED = "RELEASE_NOT_PROMOTED"
+    OPS_NOT_READY = "OPS_NOT_READY"
+    RISK_NOT_AUTHORIZED = "RISK_NOT_AUTHORIZED"
+    ORDER_TYPE_NOT_AUTHORIZED = "ORDER_TYPE_NOT_AUTHORIZED"
+    SYMBOL_NOT_AUTHORIZED = "SYMBOL_NOT_AUTHORIZED"
+    RECONCILIATION_NOT_READY = "RECONCILIATION_NOT_READY"
+    CREDENTIAL_CAPABILITY_INVALID = "CREDENTIAL_CAPABILITY_INVALID"
+    CREDENTIAL_CAPABILITY_REQUIRED = "CREDENTIAL_CAPABILITY_REQUIRED"
+    RELEASE_BINDING_MISMATCH = "RELEASE_BINDING_MISMATCH"
+    RELEASE_BINDING_REQUIRED = "RELEASE_BINDING_REQUIRED"
+    TESTNET_QUALIFICATION_MISMATCH = "TESTNET_QUALIFICATION_MISMATCH"
+    TESTNET_QUALIFICATION_INVALID = "TESTNET_QUALIFICATION_INVALID"
+    TESTNET_QUALIFICATION_REQUIRED = "TESTNET_QUALIFICATION_REQUIRED"
+    ACTIVATION_SOURCE_MISMATCH = "ACTIVATION_SOURCE_MISMATCH"
+    ACTIVATION_GRANT_NOT_YET_VALID = "ACTIVATION_GRANT_NOT_YET_VALID"
+    ACTIVATION_GRANT_EXPIRED = "ACTIVATION_GRANT_EXPIRED"
+    ACTIVATION_GRANT_UNTRUSTED = "ACTIVATION_GRANT_UNTRUSTED"
+    ACTIVATION_GRANT_INVALID = "ACTIVATION_GRANT_INVALID"
+    ACTIVATION_GRANT_REQUIRED = "ACTIVATION_GRANT_REQUIRED"
+    TESTNET_ACTIVATION_ALLOWED = "TESTNET_ACTIVATION_ALLOWED"
     OPERATIONAL_READY = "OPERATIONAL_READY"
     UNKNOWN_ENVIRONMENT = "UNKNOWN_ENVIRONMENT"
     ENVIRONMENT_INACTIVE = "ENVIRONMENT_INACTIVE"
@@ -99,8 +123,10 @@ class OperationalPolicy:
     policy_id: str = "ATP_OPS_V1"
     version: str = "1.0"
     active_environments: tuple[str, ...] = ("LOCAL", "TEST", "BACKTEST", "SIMULATION")
-    inactive_environments: tuple[str, ...] = ("DRY_RUN", "TESTNET", "LIVE")
-    qualification_required: tuple[str, ...] = ("BACKTEST", "SIMULATION")
+    inactive_environments: tuple[str, ...] = ("DRY_RUN", "LIVE")
+    conditional_environments: tuple[str, ...] = ("TESTNET",)
+    activation_policy_id: str = "ATP_TESTNET_ACTIVATION_V1"
+    qualification_required: tuple[str, ...] = ("BACKTEST", "SIMULATION", "TESTNET")
     observability_required: bool = True
     network_required: bool = False
     exchange_required: bool = False
@@ -194,6 +220,7 @@ class OperationalReadinessResult:
     qualification_result_identity: ContentIdentity | None
     observability_evidence_identity: ContentIdentity | None
     config: OperationalConfig | None
+    runtime_authorization_identity: ContentIdentity | None = None
 
     content_identity: ContentIdentity = dataclass_field(init=False)
 
@@ -219,6 +246,7 @@ class OperationalReadinessResult:
                 ],
                 "qualification": self.qualification_result_identity,
                 "observability": self.observability_evidence_identity,
+                "runtime_authorization": self.runtime_authorization_identity,
             }
         )
 
