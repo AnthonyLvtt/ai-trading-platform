@@ -67,6 +67,7 @@ class FakeFirstOrderTransport(FirstOrderTransport):
         self.calls = 0
         self.reply = None
         self.host = TESTNET_ENDPOINT
+        self.clock = SyntheticClock()
 
     @property
     def endpoint(self):
@@ -77,7 +78,9 @@ class FakeFirstOrderTransport(FirstOrderTransport):
         return self.source
 
     def submit(self, permit, order, at, readiness):
-        assert consume_submission_permit(permit, order, at, self.source, readiness.content_identity)
+        assert consume_submission_permit(
+            permit, order, at, self.source, readiness.content_identity, self.clock
+        )
         self.calls += 1
         if isinstance(self.reply, BaseException):
             raise self.reply

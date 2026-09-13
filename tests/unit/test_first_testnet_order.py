@@ -474,3 +474,93 @@ def test_low_decimal_context_does_not_round_cap(first_order):
     with localcontext() as ctx:
         ctx.prec = 2
         assert run_first_order(values, **deps).reason_code is Reason.NOTIONAL_LIMIT_EXCEEDED
+
+
+@pytest.mark.parametrize("deadline", ["authorization", "price", "filter"])
+@pytest.mark.parametrize("delay", [1, 2])
+def test_deadline_after_durable_reservation_blocks_http(first_order, monkeypatch, deadline, delay):
+    from unittest.mock import Mock
+
+    values, deps = first_order
+    if deadline == "authorization":
+        auth = replace(values.authorization, valid_until=NOW + timedelta(seconds=1))
+        values = replace(
+            values,
+            authorization=auth,
+            receipt=trust_first_order(auth, SyntheticFirstOrderAuthority(auth)),
+        )
+    elif deadline == "price":
+        values = replace(
+            values, price=replace(values.price, effective_at=NOW - timedelta(seconds=9))
+        )
+    else:
+        values = replace(
+            values, filters=replace(values.filters, observed_at=NOW - timedelta(seconds=899))
+        )
+    provider = Mock()
+    http = FirstOrderBinanceTestnetTransport(provider, deps["transport"].source, deps["clock"])
+    dispatch = Mock()
+    monkeypatch.setattr(http, "_dispatch", dispatch)
+    append = deps["ledger"].append
+
+    def delayed_append(*args, **kwargs):
+        append(*args, **kwargs)
+        if args[2] is SubmissionState.ATTEMPT_STARTED:
+            assert deps["ledger"].consumed(
+                values.authorization.content_identity, values.authorization.client_order_id
+            )
+            deps["clock"].at += timedelta(seconds=delay)
+
+    monkeypatch.setattr(deps["ledger"], "append", delayed_append)
+    deps["transport"] = http
+    result = run_first_order(values, **deps, execute=True)
+    assert result.state is SubmissionState.UNKNOWN
+    assert result.transport_call_count == 0
+    provider.load.assert_not_called()
+    dispatch.assert_not_called()
+    assert deps["ledger"].consumed(
+        values.authorization.content_identity, values.authorization.client_order_id
+    )
+    # Even rewinding the test clock cannot restore the consumed authorization.
+    deps["clock"].at = NOW
+    assert (
+        run_first_order(values, **deps, execute=True).reason_code
+        is Reason.FIRST_ORDER_ALREADY_CONSUMED
+    )
+
+
+@pytest.mark.parametrize("pause", ["credentials", "connect"])
+def test_deadline_rechecked_after_transport_preparation(first_order, monkeypatch, pause):
+    from unittest.mock import Mock
+
+    from atp.exchange.transport import CredentialMaterial
+
+    values, deps = first_order
+    provider = Mock()
+
+    def load():
+        if pause == "credentials":
+            deps["clock"].at += timedelta(seconds=11)
+        return CredentialMaterial("synthetic", "synthetic")
+
+    provider.load.side_effect = load
+    http = FirstOrderBinanceTestnetTransport(provider, deps["transport"].source, deps["clock"])
+    connection = Mock()
+    connection.connect.side_effect = lambda: setattr(
+        deps["clock"], "at", NOW + timedelta(seconds=11)
+    )
+    factory = Mock(return_value=connection)
+    from http import client
+
+    monkeypatch.setattr(client, "HTTPSConnection", factory)
+    deps["transport"] = http
+    result = run_first_order(values, **deps, execute=True)
+    assert result.state is SubmissionState.UNKNOWN and result.transport_call_count == 0
+    connection.request.assert_not_called()
+    if pause == "credentials":
+        factory.assert_not_called()
+    else:
+        connection.close.assert_called_once()
+    assert deps["ledger"].consumed(
+        values.authorization.content_identity, values.authorization.client_order_id
+    )

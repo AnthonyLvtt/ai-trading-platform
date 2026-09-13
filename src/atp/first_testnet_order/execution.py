@@ -2,14 +2,22 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from threading import Lock
 
+from atp.exchange.filters import NotionalPriceEvidence, SymbolFilterEvidence
 from atp.exchange.model import ExchangeOrderRequest, Status, valid
+from atp.exchange.model import Reason as ExchangeReason
 from atp.exchange.read_only import EvidenceRecord, encoded, verify_record
 from atp.exchange.shadow import inspect_exchange_reply
+from atp.exchange.time_evidence import ExchangeTimeEvidence
 from atp.exchange.transport import TransportReply
-from atp.first_testnet_order.gate import FirstOrderInputs, evaluate_first_order
+from atp.first_testnet_order.gate import (
+    FirstOrderInputs,
+    GateClock,
+    GateTimeSample,
+    evaluate_first_order,
+)
 from atp.first_testnet_order.ledger import (
     AlreadyConsumed,
     LedgerUnavailable,
@@ -40,6 +48,42 @@ class SubmissionPermit(EvidenceRecord):
     credential_source_identity: ContentIdentity
     readiness_identity: ContentIdentity
     at: datetime
+    authorization_valid_until: datetime
+    price_fresh_until: datetime
+    filter_fresh_until: datetime
+
+
+def submission_permit_time(permit: object, clock: object) -> datetime | None:
+    """Fresh trusted time at the economic boundary, with exclusive deadlines."""
+    if not verify_record(permit, SubmissionPermit) or not isinstance(clock, GateClock):
+        return None
+    assert isinstance(permit, SubmissionPermit)
+    sample = clock.read()
+    if (
+        type(sample) is not GateTimeSample
+        or not verify_record(sample.evidence, ExchangeTimeEvidence)
+        or type(sample.gate_evaluation_time) is not datetime
+    ):
+        return None
+    now = sample.gate_evaluation_time
+    evidence = sample.evidence
+    if (
+        now.tzinfo is not UTC
+        or now < permit.at
+        or evidence.local_observed_at > now
+        or abs(evidence.server_time - evidence.local_observed_at) > timedelta(seconds=5)
+        or abs(now - evidence.server_time) > timedelta(seconds=5)
+        or not all(
+            now < deadline
+            for deadline in (
+                permit.authorization_valid_until,
+                permit.price_fresh_until,
+                permit.filter_fresh_until,
+            )
+        )
+    ):
+        return None
+    return now
 
 
 _permits: dict[int, tuple[SubmissionPermit, ContentIdentity]] = {}
@@ -52,6 +96,7 @@ def consume_submission_permit(
     at: object,
     credential_source_identity: object,
     readiness_identity: object,
+    clock: object = None,
 ) -> bool:
     """Transport defense: exact process-local, one-use receipt, never caller booleans."""
     with _permit_lock:
@@ -69,6 +114,7 @@ def consume_submission_permit(
         and permit.credential_source_identity == credential_source_identity
         and permit.readiness_identity == readiness_identity
         and order.environment == "TESTNET"
+        and submission_permit_time(permit, clock) is not None
     )
 
 
@@ -149,12 +195,17 @@ def run_first_order(
 
     assert isinstance(inputs.readiness, OperationalReadinessResult)
     readiness_identity = inputs.readiness.content_identity
+    assert isinstance(inputs.price, NotionalPriceEvidence)
+    assert isinstance(inputs.filters, SymbolFilterEvidence)
     permit = SubmissionPermit(
         auth.content_identity,
         order.content_identity,
         ctx.credential_source_identity,
         readiness_identity,
         at,
+        min(auth.valid_until, ctx.validity_end),
+        inputs.price.effective_at + timedelta(seconds=10),
+        inputs.filters.observed_at + timedelta(minutes=15),
     )
     with _permit_lock:
         _permits[id(permit)] = (permit, permit.content_identity)
@@ -167,6 +218,15 @@ def run_first_order(
     finally:
         with _permit_lock:
             _permits.pop(id(permit), None)
+    calls = (
+        0
+        if (
+            type(reply) is TransportReply
+            and reply.error is ExchangeReason.TESTNET_RUNTIME_BLOCKED
+            and reply.possibly_sent is False
+        )
+        else 1
+    )
     mapped = inspect_exchange_reply(reply, order, at)
     state = (
         SubmissionState.ACKNOWLEDGED
@@ -202,7 +262,7 @@ def run_first_order(
         mapped.exchange_order_id,
         status,
         mapped.exchange_event_time,
-        1,
+        calls,
     )
     try:
         ledger.append(
@@ -217,6 +277,6 @@ def run_first_order(
             SubmissionState.UNKNOWN,
             auth.content_identity,
             order.content_identity,
-            transport_call_count=1,
+            transport_call_count=calls,
         )
     return result

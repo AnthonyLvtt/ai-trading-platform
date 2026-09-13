@@ -149,3 +149,23 @@ durable reservation failures/concurrency/crash/restart, secret-safe errors,
 check-only, one fake ACK, no second attempt, UNKNOWN and read-only reconciliation.
 Socket creation is forbidden in these tests. Existing ATP and TQ catalogues,
 closed Observability taxonomy, Accounting and Risk/OPS/Release policies are kept.
+
+## CTO review correction — transport deadlines
+
+The process-local permit binds absolute authorization/context expiry, price
+freshness expiry and filter freshness expiry. The transport takes an injected
+trusted GateClock; absence, invalid time evidence, clock regression or reaching
+any deadline fails closed. Transport deadlines are exclusive (`now < deadline`).
+
+Time is checked when consuming the one-use permit, before credential loading,
+after credential loading, after connection establishment before signing, and
+immediately before the HTTP request write. The HTTP timestamp uses the fresh
+sample. A suspension during transport preparation therefore cannot reuse the
+reservation-time sample as permission. No production clock source is installed
+implicitly.
+
+Expiration after ATTEMPT_STARTED never deletes or releases the reservation.
+It returns UNKNOWN with zero economic transport calls and requires intervention;
+rewinding a test clock or restarting cannot allow another attempt. Regression
+tests cover authorization/price/filter deadlines (including equality), delayed
+credential loading and delayed connection establishment, with fake HTTP only.
