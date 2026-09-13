@@ -173,3 +173,25 @@ def check_market_filters(
             if isinstance(error, EvidenceError) and error.args == ("UNSUPPORTED_SYMBOL_FILTER",)
             else "SYMBOL_FILTER_INCOMPATIBLE"
         )
+
+
+def market_notional_price_contract(evidence: object) -> tuple[str, int] | None:
+    """Public inspection of the applicable MARKET price source; no price invention."""
+    if not verify_record(evidence, SymbolFilterEvidence):
+        return None
+    assert isinstance(evidence, SymbolFilterEvidence)
+    try:
+        _, filters = _filters(evidence)
+        n = filters.get("NOTIONAL", filters.get("MIN_NOTIONAL"))
+        if n is not None:
+            applied = (
+                n["applyMinToMarket"] or n["applyMaxToMarket"]
+                if n["filterType"] == "NOTIONAL"
+                else n["applyToMarket"]
+            )
+            if applied:
+                window = n["avgPriceMins"]
+                return ("EXCHANGE_AVERAGE_PRICE" if window > 0 else "EXCHANGE_LAST_PRICE", window)
+        return ("EXCHANGE_LAST_PRICE", 0)
+    except (ValueError, KeyError, TypeError):
+        return None
