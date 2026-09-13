@@ -8,7 +8,7 @@ import http.client
 import json
 import os
 import ssl
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -147,6 +147,8 @@ class BinanceTestnetHTTPTransport:
         order: ExchangeOrderRequest | None,
         at: datetime,
         material: CredentialMaterial,
+        *,
+        before_send: Callable[[], datetime | None] | None = None,
     ) -> TransportReply:
         # Fixed host and paths; http.client neither follows redirects nor consumes proxy env vars.
         connection = http.client.HTTPSConnection(
@@ -155,6 +157,11 @@ class BinanceTestnetHTTPTransport:
         possible = False
         try:
             connection.connect()
+            if before_send is not None:
+                current = before_send()
+                if current is None:
+                    return TransportReply(error=Reason.TESTNET_RUNTIME_BLOCKED)
+                at = current
             if operation is Operation.PING:
                 path, body, headers = "/api/v3/ping", None, {}
                 method = "GET"
@@ -172,6 +179,8 @@ class BinanceTestnetHTTPTransport:
                 method = "POST" if operation is Operation.SUBMIT else "GET"
                 path = "/api/v3/order" if method == "POST" else "/api/v3/order?" + signed
                 body = signed if method == "POST" else None
+            if before_send is not None and before_send() is None:
+                return TransportReply(error=Reason.TESTNET_RUNTIME_BLOCKED)
             possible = True
             connection.request(method, path, body=body, headers=headers)
             response = connection.getresponse()

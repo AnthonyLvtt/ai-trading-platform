@@ -21,7 +21,7 @@ from atp.testnet_activation.contracts import (
 )
 
 
-def authorize_exchange_submission(
+def inspect_submission_prerequisites(
     order: object,
     *,
     proof: object = None,
@@ -79,5 +79,12 @@ def authorize_exchange_submission(
         return block(Reason.RELEASE_NOT_PROMOTED)
     if check_market_filters(filters, order.symbol, order.quantity, at, price) is not None:
         return block(Reason.INVALID_ACTIVATION_INPUT)
-    # Normative constant, not a configuration flag. ENG-TO-001 is a separate CTO gate.
-    return block(Reason.TESTNET_RUNTIME_BLOCKED)
+    return ActivationResult(Reason.TESTNET_ACTIVATION_ALLOWED)
+
+
+def authorize_exchange_submission(order: object, **evidence: object) -> ActivationResult:
+    """Legacy TA gate retains its unconditional first-order barrier."""
+    result = inspect_submission_prerequisites(order, **evidence)
+    if result.reason_code is Reason.TESTNET_ACTIVATION_ALLOWED:
+        return ActivationResult(Reason.TESTNET_RUNTIME_BLOCKED)
+    return result
