@@ -93,6 +93,7 @@ def test_missing_secret(
     missing: str,
 ) -> None:
     monkeypatch.delenv("ATP_BINANCE_TESTNET_" + missing)
+    provider = ReferencedEnvironmentCredentialsProvider(new_credential_reference())
     with pytest.raises(CredentialCapabilityUnavailable) as error:
         authority(provider, statement(provider)).attest(provider.reference.content_identity)
     assert error.value.reason == Reason.CREDENTIAL_CAPABILITY_INVALID
@@ -172,6 +173,57 @@ def test_reference_independent_of_secrets(
     monkeypatch.setenv("ATP_BINANCE_TESTNET_API_SECRET", "different-synthetic-secret")
     assert provider.reference.content_identity == identity
     assert new_credential_reference() != provider.reference
+
+
+def test_environment_replacement_cannot_transfer_attestation(provider, monkeypatch, caplog):
+    attestation = statement(provider)
+    runtime = authority(provider, attestation)
+    before = runtime.attest(provider.reference.content_identity)
+    monkeypatch.setenv("ATP_BINANCE_TESTNET_API_KEY", "replacement-key")
+    monkeypatch.setenv("ATP_BINANCE_TESTNET_API_SECRET", "replacement-secret")
+    assert runtime.attest(provider.reference.content_identity) == before
+    material = provider.load()
+    assert (material.api_key, material.api_secret) == (KEY, SECRET)
+    material.api_secret = "mutated-container"
+    assert provider.load().api_secret == SECRET
+    with pytest.raises(CredentialCapabilityUnavailable) as error:
+        ReferencedEnvironmentCredentialsProvider(provider.reference)
+    assert error.value.reason == Reason.CREDENTIAL_REFERENCE_MISMATCH
+    replacement = ReferencedEnvironmentCredentialsProvider(new_credential_reference())
+    assert replacement.load().api_secret == "replacement-secret"
+    with pytest.raises(CredentialCapabilityUnavailable):
+        authority(replacement, attestation).attest(replacement.reference.content_identity)
+    fresh = statement(replacement)
+    assert fresh.content_identity != attestation.content_identity
+    evidence = authority(replacement, fresh).attest(replacement.reference.content_identity)
+    assert evidence.permission_attestation_identity == fresh.content_identity
+    from hashlib import sha256
+
+    outputs = repr((before, evidence, provider, runtime, error.value)) + caplog.text
+    for secret in (KEY, SECRET, "replacement-key", "replacement-secret"):
+        assert secret not in outputs
+        assert sha256(secret.encode()).hexdigest() not in outputs
+
+
+def test_missing_snapshot_cannot_be_populated_later(monkeypatch):
+    monkeypatch.delenv("ATP_BINANCE_TESTNET_API_KEY", raising=False)
+    monkeypatch.delenv("ATP_BINANCE_TESTNET_API_SECRET", raising=False)
+    provider = ReferencedEnvironmentCredentialsProvider(new_credential_reference())
+    monkeypatch.setenv("ATP_BINANCE_TESTNET_API_KEY", KEY)
+    monkeypatch.setenv("ATP_BINANCE_TESTNET_API_SECRET", SECRET)
+    assert provider.load() is None
+    assert provider.credentials_present() is False
+    with pytest.raises(CredentialCapabilityUnavailable):
+        authority(provider, statement(provider)).attest(provider.reference.content_identity)
+
+
+def test_provider_binding_is_immutable(provider):
+    from dataclasses import FrozenInstanceError
+
+    with pytest.raises(FrozenInstanceError):
+        provider.reference = new_credential_reference()
+    with pytest.raises(FrozenInstanceError):
+        provider._material = ("replacement-key", "replacement-secret")
 
 
 def test_activation_consumes_runtime_attestation(provider, activation) -> None:

@@ -5,8 +5,9 @@ The operator, not this module, establishes the out-of-band permission facts.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from threading import Lock
 from uuid import uuid4
 
 from atp.exchange.transport import CredentialMaterial, EnvironmentCredentialsProvider
@@ -65,23 +66,40 @@ def _reference_valid(reference: object) -> bool:
     )
 
 
+_BOUND_REFERENCES: set[str] = set()
+_BINDING_LOCK = Lock()
+
+
+@dataclass(frozen=True, slots=True, init=False, repr=False)
 class ReferencedEnvironmentCredentialsProvider:
-    """Existing process-environment loader bound to a non-secret reference."""
+    """Load once: a reference cannot be rebound to another source in this process."""
+
+    reference: CredentialReference
+    _material: tuple[str, str] | None = field(repr=False)
 
     def __init__(self, reference: CredentialReference) -> None:
         if not _reference_valid(reference):
             raise CredentialCapabilityUnavailable(Reason.CREDENTIAL_CAPABILITY_INVALID)
-        self.reference = reference
-        self._provider = EnvironmentCredentialsProvider()
+        with _BINDING_LOCK:
+            if reference.credential_reference_id in _BOUND_REFERENCES:
+                raise CredentialCapabilityUnavailable(Reason.CREDENTIAL_REFERENCE_MISMATCH)
+            material = EnvironmentCredentialsProvider().load()
+            snapshot = None
+            if material is not None and all(
+                type(value) is str and bool(value)
+                for value in (material.api_key, material.api_secret)
+            ):
+                snapshot = (material.api_key, material.api_secret)
+            _BOUND_REFERENCES.add(reference.credential_reference_id)
+            object.__setattr__(self, "reference", reference)
+            object.__setattr__(self, "_material", snapshot)
 
     def load(self) -> CredentialMaterial | None:
-        return self._provider.load()
+        # Return a fresh transport container; mutation cannot alter the snapshot.
+        return None if self._material is None else CredentialMaterial(*self._material)
 
     def credentials_present(self) -> bool:
-        material = self.load()
-        return material is not None and all(
-            type(value) is str and bool(value) for value in (material.api_key, material.api_secret)
-        )
+        return self._material is not None
 
     def __repr__(self) -> str:
         return "ReferencedEnvironmentCredentialsProvider(<opaque>)"
