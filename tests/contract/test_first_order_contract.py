@@ -121,6 +121,8 @@ def test_normal_cli_and_ci_remain_blocked():
             status="BLOCKED",
             transport_call_count=0,
             reason_code="FIRST_ORDER_AUTHORIZATION_REQUIRED",
+            real_economic_calls=0,
+            LIVE="LIVE_FORBIDDEN",
         )
     result = subprocess.run(
         [sys.executable, "scripts/submit_first_testnet_order.py"],
@@ -146,5 +148,7 @@ def test_authority_boundaries():
             for n in ast.walk(tree)
         )
     script = Path("scripts/submit_first_testnet_order.py").read_text()
-    assert "os.environ" not in script
+    # ENG-TO-OPS-002 explicitly snapshots then removes credentials before build/test children.
+    assert "ReferencedEnvironmentCredentialsProvider(reference)" in script
+    assert "os.environ.pop(name, None)" in script
     assert "Synthetic" not in script

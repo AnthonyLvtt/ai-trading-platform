@@ -40,7 +40,7 @@ def materialize_source(root: Path, destination: Path, source: SourceTree) -> Non
         output.chmod(0o755 if entry.git_mode == "100755" else 0o644)
 
 
-def run(root: Path, version: str, output: Path, commit: str) -> int:
+def run(root: Path, version: str, output: Path, commit: str, *, on_qualified=None) -> int:
     try:
         before = inspect_source(root)
         if before.source_commit_sha != commit or before.source_branch != "main":
@@ -126,6 +126,8 @@ def run(root: Path, version: str, output: Path, commit: str) -> int:
                 (stage / "qualification.json").read_bytes()
             )
             print("QUALIFIED", result.bundle.candidate.release_candidate_id)
+            if on_qualified is not None:
+                on_qualified(result.bundle, wheel)
         return 0
     except (ReleaseError, OSError) as exc:
         print(

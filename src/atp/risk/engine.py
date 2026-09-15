@@ -266,6 +266,11 @@ def _validate_portfolio(
         return RiskReasonCode.PORTFOLIO_STATE_UNKNOWN
     if not isinstance(portfolio, PortfolioState):
         return RiskReasonCode.PORTFOLIO_STATE_INCONSISTENT
+    if (
+        portfolio.source_evidence_identity is not None
+        and type(portfolio.source_evidence_identity) is not ContentIdentity
+    ):
+        return RiskReasonCode.PORTFOLIO_STATE_INCONSISTENT
     if not isinstance(portfolio.knowledge_status, PortfolioKnowledgeStatus) or not isinstance(
         portfolio.positions,
         tuple,

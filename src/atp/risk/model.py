@@ -135,16 +135,20 @@ class OpenPosition:
 class PortfolioState:
     knowledge_status: PortfolioKnowledgeStatus
     positions: tuple[OpenPosition, ...]
+    source_evidence_identity: ContentIdentity | None = None
 
     @classmethod
     def create(
         cls,
         knowledge_status: PortfolioKnowledgeStatus,
         positions: tuple[OpenPosition, ...] = (),
+        *,
+        source_evidence_identity: ContentIdentity | None = None,
     ) -> PortfolioState:
         return cls(
             knowledge_status=knowledge_status,
             positions=tuple(sorted(positions, key=lambda position: str(position.position_id))),
+            source_evidence_identity=source_evidence_identity,
         )
 
     def canonical_value(self) -> dict[str, object]:
@@ -155,6 +159,15 @@ class PortfolioState:
                 PortfolioKnowledgeStatus,
             ),
             "positions": _canonical_positions(positions),
+            **(
+                {
+                    "source_evidence_identity": str(self.source_evidence_identity)
+                    if type(self.source_evidence_identity) is ContentIdentity
+                    else "INVALID"
+                }
+                if self.source_evidence_identity is not None
+                else {}
+            ),
         }
 
     @property
