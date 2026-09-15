@@ -75,6 +75,28 @@ def cli_module():
     return module
 
 
+@pytest.mark.parametrize("value", [None, "", "not-an-identity", "sha256:bad"])
+def test_cli_never_invents_missing_or_malformed_pins(value):
+    module = cli_module()
+    args = SimpleNamespace(activation_grant_pin=value)
+    assert module.read_external_pin(args, "activation-grant") is None
+
+
+def test_cli_pins_are_separate_explicit_inputs():
+    from atp.shared.identity import ContentIdentity
+
+    module = cli_module()
+    a, b = (
+        ContentIdentity.from_text("external activation"),
+        ContentIdentity.from_text("external first"),
+    )
+    args = SimpleNamespace(activation_grant_pin=str(a), first_order_authorization_pin=str(b))
+    assert module.read_external_pin(args, "activation-grant") == a
+    assert module.read_external_pin(args, "first-order-authorization") == b
+    args.prepare = True
+    assert module.read_external_pin(args, "first-order-authorization") is None
+
+
 def test_execute_refused_before_any_credentials_or_network(monkeypatch):
     module = cli_module()
 

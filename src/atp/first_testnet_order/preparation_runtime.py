@@ -112,8 +112,8 @@ class CheckOnlyTransport(FirstOrderTransport):
 
 
 class _SessionGrantAuthority(TrustedActivationAuthority):
-    def __init__(self, grant: TestnetActivationGrant) -> None:
-        self.pin = grant.content_identity
+    def __init__(self, external_pin: ContentIdentity) -> None:
+        self.pin = external_pin
 
     @property
     def accepted_grant_identity(self) -> ContentIdentity:
@@ -132,8 +132,8 @@ class _SessionGrantAuthority(TrustedActivationAuthority):
 
 
 class _SessionFirstAuthority(TrustedFirstOrderAuthority):
-    def __init__(self, authorization: FirstTestnetOrderAuthorization) -> None:
-        self.pin = authorization.content_identity
+    def __init__(self, external_pin: ContentIdentity) -> None:
+        self.pin = external_pin
 
     @property
     def accepted_authorization_identity(self) -> ContentIdentity:
@@ -162,6 +162,7 @@ def prepare_check_only(
     workspace: Path,
     ledger: TestnetSubmissionLedger,
     artifact_sink: Callable[[str, object], None] | None = None,
+    trust_pin_source: Callable[[str], ContentIdentity | None] | None = None,
 ) -> dict[str, object]:
     """No execute option. Every proof belongs to this evaluation, never a cached Risk result."""
     # Establish capabilities before any network read, independently of account responses.
@@ -180,6 +181,26 @@ def prepare_check_only(
         at + timedelta(minutes=30),
         "CTO",
     )
+
+    def external_pin(
+        name: str, artifact: object, identity: ContentIdentity
+    ) -> ContentIdentity | None:
+        if artifact_sink is not None:
+            artifact_sink(name, artifact)
+        # The authority channel receives only the kind, never the candidate or its identity.
+        pin = None if trust_pin_source is None else trust_pin_source(name)
+        return pin if type(pin) is ContentIdentity and pin == identity else None
+
+    grant_pin = external_pin("activation-grant", grant, grant.content_identity)
+    if grant_pin is None:
+        return {
+            "status": "BLOCKED",
+            "reason_code": "TRUST_PIN_REQUIRED",
+            "activation_grant_identity": str(grant.content_identity),
+            "real_economic_calls": 0,
+            "LIVE": "LIVE_FORBIDDEN",
+        }
+    at = clock.read().gate_evaluation_time
     activation = validate_activation(
         grant,
         source_commit_sha=release.source.source_commit_sha,
@@ -192,7 +213,7 @@ def prepare_check_only(
         symbol="BTCUSDT",
         order_type="MARKET",
         at=at,
-        grant_authority=_SessionGrantAuthority(grant),
+        grant_authority=_SessionGrantAuthority(grant_pin),
         credential_authority=credential_authority,
     )
     context = activation.context
@@ -343,7 +364,17 @@ def prepare_check_only(
         at,
         at + timedelta(minutes=15),
     )
-    receipt = trust_first_order(authorization, _SessionFirstAuthority(authorization))
+    first_pin = external_pin(
+        "first-order-authorization", authorization, authorization.content_identity
+    )
+    if first_pin is None:
+        report.update(
+            reason_code="TRUST_PIN_REQUIRED",
+            activation_grant_identity=str(grant.content_identity),
+            first_order_identity=str(authorization.content_identity),
+        )
+        return report
+    receipt = trust_first_order(authorization, _SessionFirstAuthority(first_pin))
     result = run_first_order(
         FirstOrderInputs(
             authorization,
@@ -367,8 +398,6 @@ def prepare_check_only(
     )
     if artifact_sink is not None:
         for name, artifact in (
-            ("activation-grant", grant),
-            ("first-order-authorization", authorization),
             ("quantity-selection", selection),
             ("portfolio-evidence", portfolio),
             ("upstream-proof", proof),

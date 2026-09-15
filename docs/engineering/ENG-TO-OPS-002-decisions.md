@@ -31,9 +31,9 @@ reference. The command removes the two variables from its own process environmen
 before running build/test children; the snapshot retains material in memory only.
 No permission is inferred from authentication or account balances.
 
-An exact local pin attests the manual permission artifact (maximum 24h). Check-only
-session authorities pin the newly constructed activation grant and first-order
-authorization. They are never default authorities. Grant validity is 30 minutes;
+An exact local pin attests the manual permission artifact (maximum 24h). The grant
+and first-order authorities receive independent external pins; they never derive
+their accepted identity from the candidate. Grant validity is 30 minutes;
 first-order validity is 15 minutes starting at preparation. The existing gate also
 requires all context/credential windows to remain valid.
 
@@ -41,6 +41,32 @@ Session files are created outside the checkout in a new private directory. They
 contain no secret, and are excluded from release/TQ output. Serialized files do
 not recreate process-local trust seals. Re-running creates a new session, never a
 silent ledger reset. No grant or credential is committed to the repository.
+
+### Independent review pins (PR #18 CTO correction)
+
+Each candidate is saved and its identity emitted with BLOCKED/TRUST_PIN_REQUIRED
+before consulting the authority channel. Missing, malformed or mismatched pins
+block. `--activation-grant-pin` and `--first-order-authorization-pin` are explicit
+external inputs, never computed by the validator. `--request-trust-pins` instead
+pauses at each boundary for the operator to paste the independently approved pin.
+The pin reader receives the artifact kind only, not the object or its identity.
+Blank input, EOF and noninteractive input without explicit pins stop safely.
+
+Review is necessarily staged: the activation grant must be trusted before the
+sealed context permits real Strategy/Risk evaluation. Only then can the first-order
+candidate be produced. No provisional or self-trusted context is used to bypass
+this dependency. The same terminal process retains the exact objects, credential
+snapshot and seals across these prepare/review/check phases. This avoids changing
+identities through a new clock sample, credential reference or process restart.
+
+`--prepare` stops without a first-order pin. Without an activation pin it only
+produces the grant candidate. Use the interactive check-only session below for the
+complete staged review; standalone prepare files are not a serialized authority
+or a restart mechanism. Restarting requires new preparation and independent pins.
+After grant input, current time is sampled again before activation. After first-order
+input, the existing gate revalidates the authorization and fresh price/filter/time
+evidence. Waiting beyond a deadline blocks; no evidence, pin or deadline is refreshed
+silently to force READY_TO_SUBMIT.
 
 ## Read-only sources
 
@@ -92,6 +118,7 @@ read -r -s -p 'Testnet API secret: ' ATP_BINANCE_TESTNET_API_SECRET
 export ATP_BINANCE_TESTNET_API_KEY ATP_BINANCE_TESTNET_API_SECRET
 uv run --frozen python scripts/submit_first_testnet_order.py \
   --check-only \
+  --request-trust-pins \
   --source-commit "$(git rev-parse HEAD)" \
   --release-version internal-check-001 \
   --session-dir /absolute/private/new-atp-check-session \

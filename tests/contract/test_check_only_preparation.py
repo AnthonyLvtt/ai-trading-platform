@@ -78,8 +78,12 @@ class OfflineSource:
         return deepcopy(self.responses[resource])
 
 
-def prepare(activation, tmp_path, source):
+def prepare_once(activation, tmp_path, source, pins=None):
     (tmp_path / "artifacts").mkdir(exist_ok=True)
+    path = tmp_path / "check.sqlite"
+    ledger = (
+        TestnetSubmissionLedger(path) if path.exists() else TestnetSubmissionLedger.create(path)
+    )
     return prepare_check_only(
         source=source,
         now=lambda: NOW,
@@ -90,8 +94,50 @@ def prepare(activation, tmp_path, source):
         credential_source_identity=activation["credential_source_identity"],
         credential_authority=activation["credential_authority"],
         workspace=tmp_path,
-        ledger=TestnetSubmissionLedger.create(tmp_path / "check.sqlite"),
+        ledger=ledger,
+        trust_pin_source=None if pins is None else pins.get,
     )
+
+
+def prepare(activation, tmp_path, source):
+    # Test-only external review: collect candidates, then explicitly supply their exact pins.
+    from atp.shared.identity import ContentIdentity
+
+    candidate = prepare_once(activation, tmp_path, source)
+    pins = {"activation-grant": ContentIdentity(*candidate["activation_grant_identity"].split(":"))}
+    candidate = prepare_once(activation, tmp_path, source, pins)
+    if "first_order_identity" not in candidate:
+        return candidate
+    pins["first-order-authorization"] = ContentIdentity(
+        *candidate["first_order_identity"].split(":")
+    )
+    return prepare_once(activation, tmp_path, source, pins)
+
+
+def test_candidate_without_external_pins_is_never_trusted(activation, tmp_path):
+    from atp.shared.identity import ContentIdentity
+
+    source = OfflineSource()
+    first = prepare_once(activation, tmp_path, source)
+    assert first["reason_code"] == "TRUST_PIN_REQUIRED"
+    assert "first_order_identity" not in first
+    assert all(name == "time" for name, _ in source.calls)
+    wrong = ContentIdentity.from_text("wrong pin")
+    assert (
+        prepare_once(activation, tmp_path, source, {"activation-grant": wrong})["status"]
+        == "BLOCKED"
+    )
+    pins = {"activation-grant": ContentIdentity(*first["activation_grant_identity"].split(":"))}
+    second = prepare_once(activation, tmp_path, source, pins)
+    assert second["reason_code"] == "TRUST_PIN_REQUIRED"
+    assert "first_order_identity" in second
+    pins["first-order-authorization"] = wrong
+    assert prepare_once(activation, tmp_path, source, pins)["status"] == "BLOCKED"
+    pins["first-order-authorization"] = ContentIdentity(*second["first_order_identity"].split(":"))
+    approved = prepare_once(activation, tmp_path, source, pins)
+    assert approved["status"] == "READY_TO_SUBMIT"
+    assert approved["real_economic_calls"] == 0
+    assert approved["ledger_state"] == "NOT_ATTEMPTED"
 
 
 @pytest.mark.parametrize(

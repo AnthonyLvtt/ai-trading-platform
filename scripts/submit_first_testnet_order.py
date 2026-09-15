@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from atp.first_testnet_order.ledger import TestnetSubmissionLedger
 from atp.first_testnet_order.preparation_http import TestnetReadOnlySource
 from atp.first_testnet_order.preparation_runtime import prepare_check_only
 from atp.release_deployment.source import inspect_source
+from atp.shared.errors import ValidationError
+from atp.shared.identity import ContentIdentity
 from atp.testnet_activation.runtime_credentials import (
     ReferencedEnvironmentCredentialsProvider,
     RuntimeCredentialCapabilityAuthority,
@@ -22,8 +25,32 @@ from atp.testnet_activation.runtime_credentials import (
 )
 
 
+def read_external_pin(args, kind):
+    if getattr(args, "prepare", False) and kind == "first-order-authorization":
+        return None
+    option = (
+        "activation_grant_pin" if kind == "activation-grant" else "first_order_authorization_pin"
+    )
+    value = getattr(args, option, None)
+    if value is None and getattr(args, "request_trust_pins", False) and sys.stdin.isatty():
+        try:
+            value = input(f"External approved pin for {kind} (blank = stop): ")
+        except EOFError:
+            return None
+    if type(value) is not str or not value:
+        return None
+    try:
+        algorithm, digest = value.split(":", 1)
+        return ContentIdentity(algorithm, digest)
+    except (ValueError, ValidationError):
+        return None
+
+
 def run(args):
-    if not args.check_only or not args.confirm_testnet_permissions:
+    if (
+        not (args.check_only or getattr(args, "prepare", False))
+        or not args.confirm_testnet_permissions
+    ):
         return {
             "status": "BLOCKED",
             "reason_code": "FIRST_ORDER_AUTHORIZATION_REQUIRED",
@@ -93,6 +120,19 @@ def run(args):
         with path.open("x") as stream:
             json.dump(document, stream, sort_keys=True)
         path.chmod(0o600)
+        if name in ("activation-grant", "first-order-authorization"):
+            print(
+                json.dumps(
+                    {
+                        "status": "BLOCKED",
+                        "reason_code": "TRUST_PIN_REQUIRED",
+                        "candidate": name,
+                        "content_identity": str(artifact.content_identity),
+                        "real_economic_calls": 0,
+                    }
+                ),
+                flush=True,
+            )
 
     save("permission-attestation", attestation)
     report = prepare_check_only(
@@ -107,6 +147,7 @@ def run(args):
         workspace=session,
         ledger=TestnetSubmissionLedger.create(session / "submission.sqlite"),
         artifact_sink=save,
+        trust_pin_source=lambda kind: read_external_pin(args, kind),
     )
     report.update(
         credential_reference_id=reference.credential_reference_id,
@@ -122,10 +163,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check-only", action="store_true")
+    mode.add_argument("--prepare", action="store_true")
     mode.add_argument("--execute", action="store_true", help="Unavailable in this composition")
     parser.add_argument("--source-commit")
     parser.add_argument("--release-version")
     parser.add_argument("--session-dir", type=Path)
+    parser.add_argument("--activation-grant-pin")
+    parser.add_argument("--first-order-authorization-pin")
+    parser.add_argument(
+        "--request-trust-pins",
+        action="store_true",
+        help="Pause for independently approved pins in the current terminal session",
+    )
     parser.add_argument(
         "--confirm-testnet-permissions",
         action="store_true",
@@ -133,7 +182,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     if (
-        args.check_only
+        (args.check_only or args.prepare)
         and args.confirm_testnet_permissions
         and not all((args.source_commit, args.release_version, args.session_dir))
     ):
