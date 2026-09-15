@@ -34,7 +34,7 @@ class Reports:
         )
 
 
-def collect(output: Path) -> int:
+def collect(output: Path, *, on_qualified=None) -> int:
     root = Path(__file__).resolve().parents[1]
     if Path.cwd() != root:
         raise SystemExit("Run from repository root")
@@ -94,6 +94,8 @@ def collect(output: Path) -> int:
     }
     output.write_bytes(canonical_json_bytes(document))
     print(result.status.value, str(result.content_identity))
+    if on_qualified is not None and result.status.value == "PASSED" and code == 0:
+        on_qualified(result, bundle)
     return 0 if result.status.value == "PASSED" and code == 0 else 1
 
 

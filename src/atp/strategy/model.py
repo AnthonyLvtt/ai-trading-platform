@@ -27,6 +27,7 @@ class EvaluationStatus(StrEnum):
 
 
 class ReasonCode(StrEnum):
+    RUNTIME_AUTHORIZATION_INVALID = "RUNTIME_AUTHORIZATION_INVALID"
     INSUFFICIENT_HISTORY = "INSUFFICIENT_HISTORY"
     DATA_CONTRACT_UNSATISFIED = "DATA_CONTRACT_UNSATISFIED"
     SNAPSHOT_INCOMPATIBLE = "SNAPSHOT_INCOMPATIBLE"
@@ -69,9 +70,19 @@ class StrategyEvaluationContext:
     universe: UniverseSnapshot
     evaluation_time: LogicalTime
     symbol: str
+    runtime_authorization: object = None
+    candle_interval: str | None = None
 
     def __post_init__(self) -> None:
-        require_active_environment(self.environment)
+        if self.environment is Environment.TESTNET:
+            from atp.testnet_activation.contracts import context_error
+
+            if context_error(
+                self.runtime_authorization, self.evaluation_time.value, symbol=self.symbol
+            ):
+                raise ValidationError("TESTNET Strategy authorization invalid")
+        else:
+            require_active_environment(self.environment)
         if not self.symbol or self.symbol.strip() != self.symbol:
             raise ValidationError("Strategy evaluation symbol must be non-empty and trimmed")
 
@@ -111,6 +122,8 @@ class SignalProvenance:
     evaluation_time: LogicalTime
     symbol: str
     used_data: tuple[UsedDataPoint, ...]
+    runtime_authorization_identity: ContentIdentity | None = None
+    candle_interval: str | None = None
 
     def __post_init__(self) -> None:
         if not self.strategy_version or self.strategy_version.strip() != self.strategy_version:
@@ -127,6 +140,14 @@ class SignalProvenance:
     def canonical_value(self) -> dict[str, object]:
         return {
             "configuration": self.configuration.canonical_value(),
+            **(
+                {
+                    "runtime_authorization_identity": str(self.runtime_authorization_identity),
+                    "candle_interval": self.candle_interval,
+                }
+                if self.runtime_authorization_identity is not None
+                else {}
+            ),
             "configuration_identity": str(self.configuration.content_identity),
             "dataset_id": str(self.dataset_id),
             "environment": self.environment.value,
