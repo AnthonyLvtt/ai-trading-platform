@@ -11,6 +11,7 @@ from atp.exchange.filters import (
     SymbolFilterEvidence,
     check_market_filters,
     market_notional_price_contract,
+    market_quantity_rules,
 )
 from atp.exchange.read_only import (
     EvidenceError,
@@ -40,7 +41,9 @@ class QuantitySelectionEvidence(EvidenceRecord):
     selection_policy: str = "MAX_ADMISSIBLE_UNDER_QUOTE_CAP"
 
 
-def select_quantity(filters: object, price: object, at: datetime) -> QuantitySelectionEvidence:
+def select_quantity(
+    filters: object, price: object, at: datetime, open_orders: object = None
+) -> QuantitySelectionEvidence:
     """Select an integer grid index exactly; never round an existing order quantity."""
     if not verify_record(filters, SymbolFilterEvidence) or not verify_record(
         price, NotionalPriceEvidence
@@ -55,7 +58,7 @@ def select_quantity(filters: object, price: object, at: datetime) -> QuantitySel
         raise EvidenceError("NO_ADMISSIBLE_QUANTITY")
     raw = json.loads(filters.payload)
     items = {item["filterType"]: item for item in raw["filters"]}
-    lot = items.get("MARKET_LOT_SIZE", items.get("LOT_SIZE"))
+    lot = market_quantity_rules(filters)
     if lot is None:
         raise EvidenceError("NO_ADMISSIBLE_QUANTITY")
     low, high, step = (decimal_field(lot[k]) for k in ("minQty", "maxQty", "stepSize"))
@@ -80,7 +83,7 @@ def select_quantity(filters: object, price: object, at: datetime) -> QuantitySel
     if (
         quantity <= 0
         or projected > 5
-        or check_market_filters(filters, "BTCUSDT", quantity, at, price) is not None
+        or check_market_filters(filters, "BTCUSDT", quantity, at, price, open_orders) is not None
     ):
         raise EvidenceError("NO_ADMISSIBLE_QUANTITY")
     return QuantitySelectionEvidence(

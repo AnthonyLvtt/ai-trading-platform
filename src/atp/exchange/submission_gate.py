@@ -35,6 +35,7 @@ def inspect_submission_prerequisites(
     promotion: object = None,
     filters: object = None,
     price: object = None,
+    open_orders: object = None,
     at: object = None,
 ) -> ActivationResult:
     def block(reason: Reason) -> ActivationResult:
@@ -77,7 +78,10 @@ def inspect_submission_prerequisites(
     )
     if expected.status is not PromotionStatus.ALLOWED or promotion != expected:
         return block(Reason.RELEASE_NOT_PROMOTED)
-    if check_market_filters(filters, order.symbol, order.quantity, at, price) is not None:
+    if (
+        check_market_filters(filters, order.symbol, order.quantity, at, price, open_orders)
+        is not None
+    ):
         return block(Reason.INVALID_ACTIVATION_INPUT)
     return ActivationResult(Reason.TESTNET_ACTIVATION_ALLOWED)
 

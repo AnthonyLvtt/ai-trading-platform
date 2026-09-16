@@ -194,6 +194,8 @@ def main() -> int:
         reason = "FIRST_ORDER_NOT_READY"
         safe_reasons = {
             "NO_ADMISSIBLE_QUANTITY",
+            "OPEN_ORDERS_EVIDENCE_INVALID",
+            "OPEN_ORDERS_EVIDENCE_STALE",
             "CREDENTIAL_CAPABILITY_INVALID",
             "INVALID_SESSION_DIRECTORY",
             "RELEASE_BINDING_REQUIRED",
