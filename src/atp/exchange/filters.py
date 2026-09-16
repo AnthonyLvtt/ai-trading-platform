@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from fractions import Fraction
 from typing import Any
@@ -78,18 +78,51 @@ def _filters(evidence: SymbolFilterEvidence) -> tuple[dict[str, Any], dict[str, 
         "MIN_NOTIONAL": ("minNotional",),
         "NOTIONAL": ("minNotional", "maxNotional"),
     }
+    integer_schemas = {
+        "ICEBERG_PARTS": ("limit",),
+        "TRAILING_DELTA": (
+            "minTrailingAboveDelta",
+            "maxTrailingAboveDelta",
+            "minTrailingBelowDelta",
+            "maxTrailingBelowDelta",
+        ),
+        "MAX_NUM_ORDERS": ("maxNumOrders",),
+        "MAX_NUM_ORDER_LISTS": ("maxNumOrderLists",),
+        "MAX_NUM_ALGO_ORDERS": ("maxNumAlgoOrders",),
+        "MAX_NUM_ORDER_AMENDS": ("maxNumOrderAmends",),
+    }
+    schemas["PERCENT_PRICE_BY_SIDE"] = (
+        "bidMultiplierUp",
+        "bidMultiplierDown",
+        "askMultiplierUp",
+        "askMultiplierDown",
+    )
     for item in data["filters"]:
         if type(item) is not dict or type(item.get("filterType")) is not str:
             raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
         kind = item["filterType"]
-        if kind not in schemas:
+        if kind not in schemas and kind not in integer_schemas:
             raise EvidenceError("UNSUPPORTED_SYMBOL_FILTER")
         if kind in result:
+            raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
+        if kind in integer_schemas:
+            if any(type(item.get(k)) is not int or item[k] < 0 for k in integer_schemas[kind]):
+                raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
+            if kind == "TRAILING_DELTA" and (
+                item["minTrailingAboveDelta"] > item["maxTrailingAboveDelta"]
+                or item["minTrailingBelowDelta"] > item["maxTrailingBelowDelta"]
+            ):
+                raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
+            result[kind] = item
+            continue
+        if kind == "PERCENT_PRICE_BY_SIDE" and (
+            type(item.get("avgPriceMins")) is not int or item["avgPriceMins"] < 0
+        ):
             raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
         for key in schemas[kind]:
             decimal_field(item.get(key))
         bounds = schemas[kind]
-        if len(bounds) >= 2:
+        if kind != "PERCENT_PRICE_BY_SIDE" and len(bounds) >= 2:
             low, high = decimal_field(item[bounds[0]]), decimal_field(item[bounds[1]])
             if high > 0 and low > high:
                 raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
@@ -110,7 +143,12 @@ def _filters(evidence: SymbolFilterEvidence) -> tuple[dict[str, Any], dict[str, 
 
 
 def check_market_filters(
-    evidence: object, symbol: str, quantity: object, at: object, price: object = None
+    evidence: object,
+    symbol: str,
+    quantity: object,
+    at: object,
+    price: object = None,
+    open_orders: object = None,
 ) -> str | None:
     try:
         if (
@@ -131,7 +169,10 @@ def check_market_filters(
             or evidence.observed_at > at
         ):
             raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
-        lot = filters.get("MARKET_LOT_SIZE", filters.get("LOT_SIZE"))
+        capacity_error = check_order_capacity(evidence, open_orders, symbol, at)
+        if capacity_error is not None:
+            raise EvidenceError(capacity_error)
+        lot = market_quantity_rules(evidence)
         if lot is None:
             raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
         low, high, step = (
@@ -169,8 +210,15 @@ def check_market_filters(
     except (ValueError, KeyError, TypeError, AttributeError) as error:
         # Unknown filters retain their dedicated closed reason; never expose payload values.
         return (
-            "UNSUPPORTED_SYMBOL_FILTER"
-            if isinstance(error, EvidenceError) and error.args == ("UNSUPPORTED_SYMBOL_FILTER",)
+            str(error.args[0])
+            if isinstance(error, EvidenceError)
+            and error.args
+            in (
+                ("UNSUPPORTED_SYMBOL_FILTER",),
+                ("OPEN_ORDERS_EVIDENCE_STALE",),
+                ("OPEN_ORDERS_EVIDENCE_INVALID",),
+                ("ORDER_CAPACITY_EXCEEDED",),
+            )
             else "SYMBOL_FILTER_INCOMPATIBLE"
         )
 
@@ -195,3 +243,123 @@ def market_notional_price_contract(evidence: object) -> tuple[str, int] | None:
         return ("EXCHANGE_LAST_PRICE", 0)
     except (ValueError, KeyError, TypeError):
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class FilterApplicabilityEvidence(EvidenceRecord):
+    filter_identity: ContentIdentity
+    classifications: tuple[tuple[str, str], ...]
+    order_shape: str = "SPOT_BUY_MARKET_UNPRICED_STANDALONE"
+
+
+def market_filter_applicability(evidence: SymbolFilterEvidence) -> FilterApplicabilityEvidence:
+    """Explicit classification for the sole OPS-004 order shape, never arbitrary orders."""
+    _, filters = _filters(evidence)
+    applicable = {"LOT_SIZE", "MARKET_LOT_SIZE", "MAX_NUM_ORDERS"}
+    rows = []
+    for kind, item in sorted(filters.items()):
+        applies = kind in applicable
+        if kind == "NOTIONAL":
+            applies = item["applyMinToMarket"] or item["applyMaxToMarket"]
+        if kind == "MIN_NOTIONAL":
+            applies = "NOTIONAL" not in filters and item["applyToMarket"]
+        rows.append((kind, "APPLICABLE" if applies else "NOT_APPLICABLE"))
+    return FilterApplicabilityEvidence(evidence.content_identity, tuple(rows))
+
+
+def market_quantity_rules(evidence: SymbolFilterEvidence) -> dict[str, str]:
+    """Resolve disabled MARKET grid using LOT_SIZE; preserve enabled market bounds."""
+    _, filters = _filters(evidence)
+    lot = filters.get("MARKET_LOT_SIZE", filters.get("LOT_SIZE"))
+    if lot is None:
+        raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
+    result = {k: lot[k] for k in ("minQty", "maxQty", "stepSize")}
+    if decimal_field(result["stepSize"]) == 0 and "MARKET_LOT_SIZE" in filters:
+        generic = filters.get("LOT_SIZE")
+        if generic is None or decimal_field(generic["stepSize"]) <= 0:
+            raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
+        result["stepSize"] = generic["stepSize"]
+        result["minQty"] = str(
+            max(decimal_field(result["minQty"]), decimal_field(generic["minQty"]))
+        )
+        maxima = [
+            decimal_field(v) for v in (result["maxQty"], generic["maxQty"]) if decimal_field(v) > 0
+        ]
+        result["maxQty"] = str(min(maxima)) if maxima else "0"
+    return result
+
+
+MAX_OPEN_ORDERS_EVIDENCE_AGE = timedelta(seconds=10)
+
+
+@dataclass(frozen=True, slots=True)
+class OpenOrdersEvidence(EvidenceRecord):
+    symbol: str
+    order_ids: tuple[int, ...]
+    observed_at: datetime
+    source_identity: ContentIdentity
+    complete: bool
+    environment: str = "TESTNET"
+
+
+def parse_open_orders(
+    payload: object, symbol: str, at: datetime, *, complete: bool
+) -> OpenOrdersEvidence:
+    """Only a successful complete symbol-scoped read is admissible; no zero fallback."""
+    safe_json(payload)
+    if (
+        complete is not True
+        or type(payload) is not list
+        or type(at) is not datetime
+        or at.tzinfo is not UTC
+        or type(symbol) is not str
+        or not re.fullmatch(r"[A-Z0-9]{2,30}", symbol)
+    ):
+        raise EvidenceError("OPEN_ORDERS_EVIDENCE_INVALID")
+    ids = []
+    for row in payload:
+        if (
+            type(row) is not dict
+            or row.get("symbol") != symbol
+            or type(row.get("orderId")) is not int
+            or row["orderId"] < 0
+            or row.get("status") not in ("NEW", "PARTIALLY_FILLED", "PENDING_CANCEL")
+        ):
+            raise EvidenceError("OPEN_ORDERS_EVIDENCE_INVALID")
+        ids.append(row["orderId"])
+    if len(set(ids)) != len(ids):
+        raise EvidenceError("OPEN_ORDERS_EVIDENCE_INVALID")
+    return OpenOrdersEvidence(
+        symbol, tuple(sorted(ids)), at, ContentIdentity.from_canonical(payload), True
+    )
+
+
+def check_order_capacity(filters: object, orders: object, symbol: str, at: object) -> str | None:
+    try:
+        if not isinstance(filters, SymbolFilterEvidence):
+            return "OPEN_ORDERS_EVIDENCE_INVALID"
+        data, items = _filters(filters)
+        if "MAX_NUM_ORDERS" not in items:
+            return None
+        if (
+            not verify_record(orders, OpenOrdersEvidence)
+            or not isinstance(orders, OpenOrdersEvidence)
+            or orders.environment != "TESTNET"
+            or orders.symbol != symbol
+            or data["symbol"] != symbol
+            or orders.complete is not True
+            or type(at) is not datetime
+            or at.tzinfo is not UTC
+            or orders.observed_at.tzinfo is not UTC
+            or orders.observed_at > at
+            or len(set(orders.order_ids)) != len(orders.order_ids)
+            or any(i < 0 for i in orders.order_ids)
+        ):
+            return "OPEN_ORDERS_EVIDENCE_INVALID"
+        if at - orders.observed_at > MAX_OPEN_ORDERS_EVIDENCE_AGE:
+            return "OPEN_ORDERS_EVIDENCE_STALE"
+        if len(orders.order_ids) + 1 > items["MAX_NUM_ORDERS"]["maxNumOrders"]:
+            return "ORDER_CAPACITY_EXCEEDED"
+        return None
+    except (ValueError, TypeError, AttributeError):
+        return "OPEN_ORDERS_EVIDENCE_INVALID"

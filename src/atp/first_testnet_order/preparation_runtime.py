@@ -7,8 +7,11 @@ from pathlib import Path
 from typing import Protocol
 
 from atp.exchange.filters import (
+    MAX_OPEN_ORDERS_EVIDENCE_AGE,
     NotionalPriceEvidence,
+    market_filter_applicability,
     market_notional_price_contract,
+    parse_open_orders,
     parse_symbol_filters,
 )
 from atp.exchange.model import ExchangeOrderRequest, Side, UpstreamOrderProof, canonical
@@ -237,6 +240,9 @@ def prepare_check_only(
     filters = parse_symbol_filters(symbol, now())
     if filters is None or market_notional_price_contract(filters) is None:
         raise EvidenceError("INVALID_FILTER_EVIDENCE")
+    applicability = market_filter_applicability(filters)
+    if artifact_sink is not None:
+        artifact_sink("filter-applicability", applicability)
     server = clock.read().evidence.server_time
     elapsed = server - datetime(1970, 1, 1, tzinfo=UTC)
     millis = elapsed.days * 86400000 + elapsed.seconds * 1000 + elapsed.microseconds // 1000
@@ -251,6 +257,7 @@ def prepare_check_only(
     )
     account = source.read("account")
     orders = source.read("openOrders", (("symbol", "BTCUSDT"),))
+    open_orders = parse_open_orders(orders, "BTCUSDT", now(), complete=True)
     at = clock.read().gate_evaluation_time
     portfolio = portfolio_evidence(account, orders, at)
     snapshot, universe = candle_snapshot(raw, at)
@@ -311,7 +318,7 @@ def prepare_check_only(
         "BTCUSDT", amount, kind, ContentIdentity.from_canonical(value), now(), effective, window
     )
     at = clock.read().gate_evaluation_time
-    selection = select_quantity(filters, price, at)
+    selection = select_quantity(filters, price, at, open_orders)
     if portfolio.usdt_free < selection.projected_quote_notional:
         raise EvidenceError("FIRST_ORDER_NOT_READY")
     values = dict(
@@ -375,6 +382,12 @@ def prepare_check_only(
         )
         return report
     receipt = trust_first_order(authorization, _SessionFirstAuthority(first_pin))
+    # Read-only refresh may replace stale capacity facts, never grants, pins or Risk.
+    if now() - open_orders.observed_at > MAX_OPEN_ORDERS_EVIDENCE_AGE:
+        refreshed = source.read("openOrders", (("symbol", "BTCUSDT"),))
+        open_orders = parse_open_orders(refreshed, "BTCUSDT", now(), complete=True)
+        if open_orders.source_identity != portfolio.orders_identity:
+            raise EvidenceError("PORTFOLIO_STATE_UNKNOWN")
     result = run_first_order(
         FirstOrderInputs(
             authorization,
@@ -390,6 +403,7 @@ def prepare_check_only(
             promotion,
             filters,
             price,
+            open_orders,
         ),
         clock=clock,
         ledger=ledger,
@@ -399,6 +413,7 @@ def prepare_check_only(
     if artifact_sink is not None:
         for name, artifact in (
             ("quantity-selection", selection),
+            ("open-orders-evidence", open_orders),
             ("portfolio-evidence", portfolio),
             ("upstream-proof", proof),
             ("strategy-evaluation", strategy),
@@ -408,6 +423,8 @@ def prepare_check_only(
         status=result.status,
         reason_code=result.reason_code.value,
         quantity_selection=encoded(selection),
+        filter_applicability=encoded(applicability),
+        open_orders_evidence_identity=str(open_orders.content_identity),
         quantity_selection_identity=str(selection.content_identity),
         upstream_proof_identity=str(proof.content_identity),
         risk_identity=str(risk.decision.content_identity),

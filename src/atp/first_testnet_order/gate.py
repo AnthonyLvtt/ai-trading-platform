@@ -8,6 +8,7 @@ from decimal import localcontext
 from atp.exchange.filters import (
     NotionalPriceEvidence,
     SymbolFilterEvidence,
+    check_order_capacity,
     market_notional_price_contract,
 )
 from atp.exchange.model import (
@@ -85,6 +86,7 @@ class FirstOrderInputs:
     promotion: object = None
     filters: object = None
     price: object = None
+    open_orders: object = None
 
 
 def evaluate_first_order(
@@ -135,6 +137,9 @@ def evaluate_first_order(
     error, at = _freshness(auth, inputs.filters, inputs.price, clock)
     if error is not None:
         return blocked(error)
+    capacity_error = check_order_capacity(inputs.filters, inputs.open_orders, auth.symbol, at)
+    if capacity_error is not None:
+        return blocked(Reason(capacity_error))
     ordinary = request_from_proof(proof)
     evidence = {
         f.name: getattr(inputs, f.name)
@@ -158,6 +163,9 @@ def evaluate_first_order(
     error, at = _freshness(auth, inputs.filters, inputs.price, clock)
     if error is not None:
         return blocked(error)
+    capacity_error = check_order_capacity(inputs.filters, inputs.open_orders, auth.symbol, at)
+    if capacity_error is not None:
+        return blocked(Reason(capacity_error))
     if context_error(ctx, at) is not None:
         return blocked(Reason.FIRST_ORDER_NOT_READY)
     return (
