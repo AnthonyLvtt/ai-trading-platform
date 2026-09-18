@@ -5,14 +5,18 @@ import contextlib
 import io
 import json
 import os
+import signal
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from queue import Empty, Queue
+from threading import Event, Thread
 
 from atp.exchange.read_only import EvidenceError, encoded
 from atp.first_testnet_order.ledger import TestnetSubmissionLedger
 from atp.first_testnet_order.preparation_http import TestnetReadOnlySource
 from atp.first_testnet_order.preparation_runtime import prepare_check_only
+from atp.first_testnet_order.watcher import WatchWindow, watch_check_only
 from atp.release_deployment.source import inspect_source
 from atp.shared.errors import ValidationError
 from atp.shared.identity import ContentIdentity
@@ -25,7 +29,30 @@ from atp.testnet_activation.runtime_credentials import (
 )
 
 
-def read_external_pin(args, kind):
+def bounded_input(prompt, window):
+    # Only terminal input runs in the daemon; it has no credentials or runtime authority.
+    # The foreground keeps enforcing expiration while the operator reviews a candidate.
+    answers = Queue()
+
+    def read_line():
+        try:
+            answers.put(input(prompt))
+        except EOFError:
+            answers.put("")
+
+    window.read()
+    Thread(target=read_line, daemon=True).start()
+    while True:
+        window.read()
+        try:
+            answer = answers.get(timeout=0.1)
+        except Empty:
+            continue
+        window.read()
+        return answer
+
+
+def read_external_pin(args, kind, window=None):
     if getattr(args, "prepare", False) and kind == "first-order-authorization":
         return None
     option = (
@@ -34,7 +61,8 @@ def read_external_pin(args, kind):
     value = getattr(args, option, None)
     if value is None and getattr(args, "request_trust_pins", False) and sys.stdin.isatty():
         try:
-            value = input(f"External approved pin for {kind} (blank = stop): ")
+            prompt = f"External approved pin for {kind} (blank = stop): "
+            value = input(prompt) if window is None else bounded_input(prompt, window)
         except EOFError:
             return None
     if type(value) is not str or not value:
@@ -46,7 +74,7 @@ def read_external_pin(args, kind):
         return None
 
 
-def run(args):
+def run(args, window=None):
     if (
         not (args.check_only or getattr(args, "prepare", False))
         or not args.confirm_testnet_permissions
@@ -135,9 +163,13 @@ def run(args):
             )
 
     save("permission-attestation", attestation)
-    report = prepare_check_only(
+
+    def source_check():
+        if inspect_source(root) != releases[0][0].source:
+            raise EvidenceError("RELEASE_BINDING_REQUIRED")
+
+    arguments = dict(
         source=TestnetReadOnlySource(provider),
-        now=lambda: datetime.now(UTC),
         release=releases[0][0],
         wheel=releases[0][1],
         tq=qualifications[0][0],
@@ -147,8 +179,17 @@ def run(args):
         workspace=session,
         ledger=TestnetSubmissionLedger.create(session / "submission.sqlite"),
         artifact_sink=save,
-        trust_pin_source=lambda kind: read_external_pin(args, kind),
+        trust_pin_source=lambda kind: read_external_pin(args, kind, window),
     )
+    if window is not None:
+        report = watch_check_only(
+            **arguments,
+            window=window,
+            report_sink=lambda item: print(json.dumps(item, sort_keys=True), flush=True),
+            source_check=source_check,
+        )
+    else:
+        report = prepare_check_only(**arguments, now=lambda: datetime.now(UTC))
     report.update(
         credential_reference_id=reference.credential_reference_id,
         permission_attestation_identity=str(attestation.content_identity),
@@ -165,6 +206,11 @@ def main() -> int:
     mode.add_argument("--check-only", action="store_true")
     mode.add_argument("--prepare", action="store_true")
     mode.add_argument("--execute", action="store_true", help="Unavailable in this composition")
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Check-only observation at 5m closes, bounded by one externally pinned grant",
+    )
     parser.add_argument("--source-commit")
     parser.add_argument("--release-version")
     parser.add_argument("--session-dir", type=Path)
@@ -181,18 +227,32 @@ def main() -> int:
         help="Attest verified Testnet Spot trading and absent withdrawal capability",
     )
     args = parser.parse_args()
+    if args.watch and not args.check_only:
+        parser.error("watch requires check-only; prepare/execute cannot be watched")
     if (
         (args.check_only or args.prepare)
         and args.confirm_testnet_permissions
         and not all((args.source_commit, args.release_version, args.session_dir))
     ):
         parser.error("source-commit, release-version and session-dir are required")
+    window = WatchWindow(lambda: datetime.now(UTC), Event()) if args.watch else None
+    handlers = {}
+    if window is not None:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            handlers[sig] = signal.signal(sig, lambda *_: window.stop.set())
     try:
-        report = run(args)
+        report = run(args, window)
     except (ValueError, OSError) as exc:
         # Never interpolate an exception crossing a credential/network boundary.
         reason = "FIRST_ORDER_NOT_READY"
         safe_reasons = {
+            "LIVE_FORBIDDEN",
+            "SYMBOL_FILTER_EVIDENCE_STALE",
+            "WATCHER_STOPPED",
+            "ACTIVATION_GRANT_EXPIRED",
+            "ACTIVATION_GRANT_NOT_YET_VALID",
+            "ACTIVATION_GRANT_INVALID",
+            "ACTIVATION_GRANT_UNTRUSTED",
             "NO_ADMISSIBLE_QUANTITY",
             "OPEN_ORDERS_EVIDENCE_INVALID",
             "OPEN_ORDERS_EVIDENCE_STALE",
@@ -219,6 +279,9 @@ def main() -> int:
             "real_economic_calls": 0,
             "LIVE": "LIVE_FORBIDDEN",
         }
+    finally:
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
     report["transport_call_count"] = 0
     print(json.dumps(report, sort_keys=True))
     return 0 if report["status"] == "READY_TO_SUBMIT" else 2

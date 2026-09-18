@@ -9,13 +9,21 @@ from typing import Protocol
 from atp.exchange.filters import (
     MAX_OPEN_ORDERS_EVIDENCE_AGE,
     NotionalPriceEvidence,
+    check_order_capacity,
     market_filter_applicability,
     market_notional_price_contract,
     parse_open_orders,
     parse_symbol_filters,
 )
-from atp.exchange.model import ExchangeOrderRequest, Side, UpstreamOrderProof, canonical
+from atp.exchange.model import (
+    ExchangeOrderRequest,
+    Side,
+    UpstreamOrderProof,
+    canonical,
+    request_from_proof,
+)
 from atp.exchange.read_only import EvidenceError, decimal_field, encoded, timestamp
+from atp.exchange.submission_gate import inspect_submission_prerequisites
 from atp.exchange.time_evidence import parse_server_time_evidence
 from atp.exchange.transport import TransportReply
 from atp.first_testnet_order.execution import (
@@ -24,7 +32,7 @@ from atp.first_testnet_order.execution import (
     SubmissionPermit,
     run_first_order,
 )
-from atp.first_testnet_order.gate import FirstOrderInputs, GateClock, GateTimeSample
+from atp.first_testnet_order.gate import FirstOrderInputs, GateClock, GateTimeSample, _freshness
 from atp.first_testnet_order.ledger import TestnetSubmissionLedger
 from atp.first_testnet_order.model import (
     FirstOrderPolicy,
@@ -166,23 +174,28 @@ def prepare_check_only(
     ledger: TestnetSubmissionLedger,
     artifact_sink: Callable[[str, object], None] | None = None,
     trust_pin_source: Callable[[str], ContentIdentity | None] | None = None,
+    activation_grant: TestnetActivationGrant | None = None,
 ) -> dict[str, object]:
     """No execute option. Every proof belongs to this evaluation, never a cached Risk result."""
     # Establish capabilities before any network read, independently of account responses.
     credential_authority.attest(credential_source_identity)
     clock = ReadOnlyClock(source, now)
     at = clock.read().gate_evaluation_time
-    grant = TestnetActivationGrant(
-        release.source.source_commit_sha,
-        release.source.repository_identity,
-        release.candidate.content_identity,
-        release.manifest.content_identity,
-        tq.content_identity,
-        ("BTCUSDT",),
-        ("MARKET",),
-        at,
-        at + timedelta(minutes=30),
-        "CTO",
+    grant = (
+        activation_grant
+        if activation_grant is not None
+        else TestnetActivationGrant(
+            release.source.source_commit_sha,
+            release.source.repository_identity,
+            release.candidate.content_identity,
+            release.manifest.content_identity,
+            tq.content_identity,
+            ("BTCUSDT",),
+            ("MARKET",),
+            at,
+            at + timedelta(minutes=30),
+            "CTO",
+        )
     )
 
     def external_pin(
@@ -371,6 +384,38 @@ def prepare_check_only(
         at,
         at + timedelta(minutes=15),
     )
+    # Candidate admissibility is not trusted authorization. Check the ordinary gates
+    # before asking an operator to review a second pin; no receipt is manufactured.
+    error, candidate_at = _freshness(authorization, filters, price, clock)
+    if error is not None:
+        report["reason_code"] = error.value
+        return report
+    prerequisites = inspect_submission_prerequisites(
+        request_from_proof(proof),
+        proof=proof,
+        risk=risk.decision,
+        strategy=strategy,
+        grant=grant,
+        runtime_authorization=context,
+        readiness=ops,
+        release=release,
+        wheel=wheel,
+        promotion=promotion,
+        filters=filters,
+        price=price,
+        open_orders=open_orders,
+        at=candidate_at,
+    )
+    if prerequisites.reason_code.value != "TESTNET_ACTIVATION_ALLOWED":
+        return report
+    error, candidate_at = _freshness(authorization, filters, price, clock)
+    if error is not None:
+        report["reason_code"] = error.value
+        return report
+    capacity_error = check_order_capacity(filters, open_orders, "BTCUSDT", candidate_at)
+    if capacity_error is not None:
+        report["reason_code"] = capacity_error
+        return report
     first_pin = external_pin(
         "first-order-authorization", authorization, authorization.content_identity
     )
