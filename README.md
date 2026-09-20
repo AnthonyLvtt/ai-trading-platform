@@ -1,6 +1,8 @@
 # AI Trading Platform
 
-ATP is a modular algorithmic-trading platform. This repository contains its engineering foundation and initial Market Data primitives. No real trading, Binance integration, or Live credentials are enabled.
+ATP is a modular algorithmic-trading platform. V1 targets Binance Spot, LONG only, with a single position.
+
+This repository contains the modular-monolith engineering foundation and the V1 module boundaries: Market Data, Strategy, Risk, OMS, Exchange Adapter, Accounting, Backtesting/Simulation, Observability, Web supervision, Test/Qualification, Release/Deployment and Operations, plus the Binance Spot Testnet qualification, activation-grant and first-order preparation contracts. The operator command `scripts/submit_first_testnet_order.py` is read-only (`--check-only`, `--watch`, `--pre-watch-feasibility`) and has no economic execution composition. Live trading is forbidden, and credentials are never stored in the repository.
 
 ## Requirements
 
@@ -49,9 +51,13 @@ The diagnostic loads an explicit environment, emits a structured JSON log, and d
 - `src/atp/test_qualification` — TEST/qualification boundary
 - `src/atp/ops` — Operations boundary
 - `src/atp/web` — Web supervision boundary
-- `src/atp/exchange` — Exchange Adapter boundary
+- `src/atp/exchange` — Exchange Adapter boundary and read-only Exchange evidence
+- `src/atp/testnet_qualification` — Testnet qualification suite
+- `src/atp/testnet_activation` — Testnet activation grant, credential capability and trust boundaries
+- `src/atp/first_testnet_order` — first Testnet order authorization, read-only preparation, watcher and pre-watch feasibility
 - `src/atp/release_deployment` — Release/Deployment boundary
 - `src/atp/persistence` — persistence ports/adapters boundary
+- `scripts` — operator and qualification commands
 - `tests/unit` — unit tests
 - `tests/contract` — boundary/contract tests
 - `docs/adr` — Accepted architecture/governance decisions available in this repository
@@ -63,3 +69,5 @@ The diagnostic loads an explicit environment, emits a structured JSON log, and d
 Accepted ATP normative documents under `docs` are the source of truth. Code must not silently redefine domain state machines or authority boundaries.
 
 See `CONTRIBUTING.md` and `docs/engineering/ENG-FOUND-001-decisions.md`.
+
+The Accepted `SPEC-*` documents cited by the ADRs and engineering records are not yet present under `docs`. Their reintegration is a separate documentation task; engineering records here are not a substitute for them.
