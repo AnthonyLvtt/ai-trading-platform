@@ -150,6 +150,34 @@ def check_market_filters(
     price: object = None,
     open_orders: object = None,
 ) -> str | None:
+    return _check_market(evidence, symbol, quantity, at, price, open_orders, capacity=True)
+
+
+def check_market_quantity(
+    evidence: object,
+    symbol: str,
+    quantity: object,
+    at: object,
+    price: object = None,
+) -> str | None:
+    """Every MARKET filter except live order capacity, for offline feasibility only.
+
+    Capacity needs a real open-orders read and is never assumed; the final gate still
+    applies ``check_market_filters`` with complete, fresh open-orders evidence.
+    """
+    return _check_market(evidence, symbol, quantity, at, price, None, capacity=False)
+
+
+def _check_market(
+    evidence: object,
+    symbol: str,
+    quantity: object,
+    at: object,
+    price: object,
+    open_orders: object,
+    *,
+    capacity: bool,
+) -> str | None:
     try:
         if (
             not verify_record(evidence, SymbolFilterEvidence)
@@ -169,9 +197,10 @@ def check_market_filters(
             or evidence.observed_at > at
         ):
             raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
-        capacity_error = check_order_capacity(evidence, open_orders, symbol, at)
-        if capacity_error is not None:
-            raise EvidenceError(capacity_error)
+        if capacity:
+            capacity_error = check_order_capacity(evidence, open_orders, symbol, at)
+            if capacity_error is not None:
+                raise EvidenceError(capacity_error)
         lot = market_quantity_rules(evidence)
         if lot is None:
             raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
@@ -221,6 +250,23 @@ def check_market_filters(
             )
             else "SYMBOL_FILTER_INCOMPATIBLE"
         )
+
+
+def market_notional_bounds(evidence: object) -> tuple[Fraction | None, Fraction | None]:
+    """Exact MARKET-applicable (minimum, maximum) notional; ``None`` means not applicable."""
+    if not verify_record(evidence, SymbolFilterEvidence):
+        raise EvidenceError("SYMBOL_FILTER_INCOMPATIBLE")
+    assert isinstance(evidence, SymbolFilterEvidence)
+    _, filters = _filters(evidence)
+    n = filters.get("NOTIONAL", filters.get("MIN_NOTIONAL"))
+    if n is None:
+        return None, None
+    minimum = n["applyMinToMarket"] if n["filterType"] == "NOTIONAL" else n["applyToMarket"]
+    maximum = n["applyMaxToMarket"] if n["filterType"] == "NOTIONAL" else False
+    return (
+        Fraction(decimal_field(n["minNotional"])) if minimum else None,
+        Fraction(decimal_field(n["maxNotional"])) if maximum else None,
+    )
 
 
 def market_notional_price_contract(evidence: object) -> tuple[str, int] | None:

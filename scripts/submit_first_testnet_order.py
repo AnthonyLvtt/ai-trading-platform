@@ -13,8 +13,9 @@ from queue import Empty, Queue
 from threading import Event, Thread
 
 from atp.exchange.read_only import EvidenceError, encoded
+from atp.first_testnet_order.feasibility import check_pre_watch_feasibility
 from atp.first_testnet_order.ledger import TestnetSubmissionLedger
-from atp.first_testnet_order.preparation_http import TestnetReadOnlySource
+from atp.first_testnet_order.preparation_http import PublicTestnetSource, TestnetReadOnlySource
 from atp.first_testnet_order.preparation_runtime import prepare_check_only
 from atp.first_testnet_order.watcher import WatchWindow, watch_check_only
 from atp.release_deployment.source import inspect_source
@@ -74,7 +75,15 @@ def read_external_pin(args, kind, window=None):
         return None
 
 
-def run(args, window=None):
+def pre_watch_feasibility(source=None):
+    """Public read-only quantity feasibility; no credentials, grant, pin or Strategy."""
+    return check_pre_watch_feasibility(
+        source=PublicTestnetSource() if source is None else source,
+        now=lambda: datetime.now(UTC),
+    )
+
+
+def run(args, window=None, feasibility_source=None):
     if (
         not (args.check_only or getattr(args, "prepare", False))
         or not args.confirm_testnet_permissions
@@ -85,6 +94,13 @@ def run(args, window=None):
             "real_economic_calls": 0,
             "LIVE": "LIVE_FORBIDDEN",
         }
+    if window is not None:
+        # ENG-TO-OPS-006: no session, release build, grant candidate or pin prompt unless a
+        # quantity can exist now. FEASIBLE does not authorize or admit any future order.
+        feasibility = pre_watch_feasibility(feasibility_source)
+        if feasibility["status"] != "FEASIBLE":
+            return feasibility
+        feasibility_identity = feasibility["feasibility_identity"]
     root = Path.cwd().resolve()
     session = args.session_dir.resolve()
     if root == session or root in session.parents or session.exists():
@@ -190,6 +206,8 @@ def run(args, window=None):
         )
     else:
         report = prepare_check_only(**arguments, now=lambda: datetime.now(UTC))
+    if window is not None:
+        report["pre_watch_feasibility_identity"] = feasibility_identity
     report.update(
         credential_reference_id=reference.credential_reference_id,
         permission_attestation_identity=str(attestation.content_identity),
@@ -206,6 +224,11 @@ def main() -> int:
     mode.add_argument("--check-only", action="store_true")
     mode.add_argument("--prepare", action="store_true")
     mode.add_argument("--execute", action="store_true", help="Unavailable in this composition")
+    mode.add_argument(
+        "--pre-watch-feasibility",
+        action="store_true",
+        help="Public read-only check that an admissible BTCUSDT quantity exists right now",
+    )
     parser.add_argument(
         "--watch",
         action="store_true",
@@ -229,6 +252,19 @@ def main() -> int:
     args = parser.parse_args()
     if args.watch and not args.check_only:
         parser.error("watch requires check-only; prepare/execute cannot be watched")
+    if args.pre_watch_feasibility:
+        try:
+            report = pre_watch_feasibility()
+        except (ValueError, OSError):
+            report = {
+                "status": "BLOCKED",
+                "reason_code": "FIRST_ORDER_NOT_READY",
+                "real_economic_calls": 0,
+                "LIVE": "LIVE_FORBIDDEN",
+            }
+        report["transport_call_count"] = 0
+        print(json.dumps(report, sort_keys=True))
+        return 0 if report["status"] == "FEASIBLE" else 2
     if (
         (args.check_only or args.prepare)
         and args.confirm_testnet_permissions

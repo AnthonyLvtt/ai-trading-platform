@@ -37,24 +37,43 @@ class TestnetReadOnlySource:
                 + hmac.new(material.api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
             )
             headers["X-MBX-APIKEY"] = material.api_key
-        connection = HTTPSConnection("testnet.binance.vision", timeout=10)
-        try:
-            connection.request(
-                "GET", "/api/v3/" + resource + ("?" + query if query else ""), headers=headers
-            )
-            response = connection.getresponse()
-            if response.status != 200:
-                raise EvidenceError("READ_ONLY_SOURCE_UNAVAILABLE")
-            body = response.read(2_000_001)
-            if len(body) > 2_000_000:
-                raise EvidenceError("READ_ONLY_SOURCE_UNAVAILABLE")
-            result = json.loads(body)
-            safe_json(result)
-            return result
-        except (OSError, HTTPException, UnicodeError, ValueError):
-            raise EvidenceError("READ_ONLY_SOURCE_UNAVAILABLE") from None
-        finally:
-            connection.close()
+        return _get(resource, query, headers)
 
     def __repr__(self) -> str:
         return "TestnetReadOnlySource(<redacted>)"
+
+
+PUBLIC_ROUTES = frozenset({"time", "exchangeInfo", "avgPrice"})
+
+
+class PublicTestnetSource:
+    """Unsigned public GETs only: it holds no credential provider and cannot read accounts."""
+
+    def read(self, resource: str, parameters: tuple[tuple[str, str], ...] = ()) -> object:
+        if resource not in PUBLIC_ROUTES:
+            raise EvidenceError("FIRST_ORDER_NOT_READY")
+        return _get(resource, urlencode(parameters), {})
+
+    def __repr__(self) -> str:
+        return "PublicTestnetSource()"
+
+
+def _get(resource: str, query: str, headers: dict[str, str]) -> object:
+    connection = HTTPSConnection("testnet.binance.vision", timeout=10)
+    try:
+        connection.request(
+            "GET", "/api/v3/" + resource + ("?" + query if query else ""), headers=headers
+        )
+        response = connection.getresponse()
+        if response.status != 200:
+            raise EvidenceError("READ_ONLY_SOURCE_UNAVAILABLE")
+        body = response.read(2_000_001)
+        if len(body) > 2_000_000:
+            raise EvidenceError("READ_ONLY_SOURCE_UNAVAILABLE")
+        result = json.loads(body)
+        safe_json(result)
+        return result
+    except (OSError, HTTPException, UnicodeError, ValueError):
+        raise EvidenceError("READ_ONLY_SOURCE_UNAVAILABLE") from None
+    finally:
+        connection.close()
