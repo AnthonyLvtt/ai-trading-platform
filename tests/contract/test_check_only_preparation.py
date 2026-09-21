@@ -164,8 +164,8 @@ def test_real_baseline_check_only(activation, tmp_path, monkeypatch, kind, statu
         assert result["ops"] == "READY"
         assert result["promotion"] == "ALLOWED"
         selection = result["quantity_selection"]
-        assert Decimal(selection["selected_quantity"]) == Decimal("0.00010")
-        assert Decimal(selection["projected_quote_notional"]) == 5
+        assert Decimal(selection["selected_quantity"]) == Decimal("0.00012")
+        assert Decimal(selection["projected_quote_notional"]) == 6
 
 
 def test_exposure_uses_normal_risk_rejection(activation, tmp_path):

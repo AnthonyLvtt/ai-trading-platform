@@ -10,6 +10,12 @@ from atp.exchange.model import client_order_id
 from atp.exchange.read_only import EvidenceRecord, encoded
 from atp.shared.identity import ContentIdentity
 
+# CTO decision ENG-TO-OPS-007: the one explicit first Testnet order quote cap. Quantity
+# selection, pre-watch feasibility and the authorization all read this value. It is an
+# authorization parameter of ATP_FIRST_TESTNET_ORDER_V1 / 1.0, never derived, widened,
+# tolerance-adjusted or raised automatically, and it is not a global default.
+FIRST_ORDER_QUOTE_CAP = Decimal("6")
+
 
 class Reason(StrEnum):
     FIRST_ORDER_AUTHORIZATION_REQUIRED = "FIRST_ORDER_AUTHORIZATION_REQUIRED"

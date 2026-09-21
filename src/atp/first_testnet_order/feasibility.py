@@ -31,13 +31,12 @@ from atp.exchange.read_only import (
     timestamp,
     verify_record,
 )
+from atp.first_testnet_order.model import FIRST_ORDER_QUOTE_CAP
 from atp.first_testnet_order.preparation_runtime import ReadOnlyClock, ReadOnlySource
 from atp.shared.errors import ValidationError
 from atp.shared.identity import ContentIdentity
 
 SYMBOL = "BTCUSDT"
-# The CTO first-order projection cap. Never derived, widened or tolerance-adjusted.
-FIRST_ORDER_QUOTE_CAP = Decimal("5")
 FILTER_EVIDENCE_MAX_AGE = timedelta(minutes=15)
 PRICE_EVIDENCE_MAX_AGE = timedelta(seconds=10)
 NO_ADMISSIBLE_QUANTITY = "NO_ADMISSIBLE_QUANTITY"

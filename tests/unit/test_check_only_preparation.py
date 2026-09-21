@@ -55,11 +55,11 @@ def test_quantity_exact_and_maximal(value):
     a = select_quantity(filters, price(value), NOW)
     assert a == select_quantity(filters, price(value), NOW)
     assert a.selected_quantity % a.step_size == 0
-    assert a.projected_quote_notional <= 5
+    assert a.projected_quote_notional <= 6
     assert (
         a.selected_quantity + a.step_size
-    ) * a.price > 5 or a.selected_quantity + a.step_size > a.max_quantity
-    assert a.quote_cap == 5
+    ) * a.price > 6 or a.selected_quantity + a.step_size > a.max_quantity
+    assert a.quote_cap == Decimal("6")
 
 
 @pytest.mark.parametrize(
@@ -71,7 +71,7 @@ def test_impossible_filters_never_increase_cap(change):
         raw["filters"][0]["minQty"] = "1"
     elif change == "notional":
         raw["filters"].append(
-            dict(filterType="MIN_NOTIONAL", minNotional="6", applyToMarket=True, avgPriceMins=0)
+            dict(filterType="MIN_NOTIONAL", minNotional="7", applyToMarket=True, avgPriceMins=0)
         )
     elif change == "unknown":
         raw["filters"].append(dict(filterType="UNKNOWN"))

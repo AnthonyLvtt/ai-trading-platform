@@ -20,6 +20,7 @@ from atp.exchange.read_only import (
     safe_json,
     verify_record,
 )
+from atp.first_testnet_order.model import FIRST_ORDER_QUOTE_CAP
 from atp.risk.identity import PositionId
 from atp.risk.model import OpenPosition, PortfolioKnowledgeStatus, PortfolioState, PositionSide
 from atp.shared.identity import ContentIdentity
@@ -37,7 +38,7 @@ class QuantitySelectionEvidence(EvidenceRecord):
     projected_quote_notional: Decimal
     filter_evidence_identity: ContentIdentity
     symbol: str = "BTCUSDT"
-    quote_cap: Decimal = Decimal("5")
+    quote_cap: Decimal = FIRST_ORDER_QUOTE_CAP
     selection_policy: str = "MAX_ADMISSIBLE_UNDER_QUOTE_CAP"
 
 
@@ -65,7 +66,7 @@ def select_quantity(
     if step <= 0:
         # No finite grid is established; do not invent a precision or fallback step.
         raise EvidenceError("NO_ADMISSIBLE_QUANTITY")
-    ceiling = Fraction(5) / Fraction(price.price)
+    ceiling = Fraction(FIRST_ORDER_QUOTE_CAP) / Fraction(price.price)
     if high > 0:
         ceiling = min(ceiling, Fraction(high))
     notional = items.get("NOTIONAL")
@@ -82,7 +83,7 @@ def select_quantity(
         projected = quantity * price.price
     if (
         quantity <= 0
-        or projected > 5
+        or projected > FIRST_ORDER_QUOTE_CAP
         or check_market_filters(filters, "BTCUSDT", quantity, at, price, open_orders) is not None
     ):
         raise EvidenceError("NO_ADMISSIBLE_QUANTITY")
