@@ -84,23 +84,33 @@ def test_unknown_and_malformed_known_filters_fail_closed():
         assert parse_symbol_filters(data, NOW) is None
 
 
-def test_zero_market_step_resolves_generic_grid_and_exact_five():
+def test_zero_market_step_resolves_generic_grid_and_exact_six():
     rules = market_quantity_rules(evidence())
     assert Decimal(rules["stepSize"]) == Decimal("0.00001")
     assert Decimal(rules["maxQty"]) == Decimal("105.07867116")
     chosen = select_quantity(evidence(), price(), NOW, orders())
-    assert chosen.selected_quantity == Decimal("0.0001")
-    assert chosen.projected_quote_notional == 5
+    assert chosen.selected_quantity == Decimal("0.00012")
+    assert chosen.projected_quote_notional == 6
     assert chosen == select_quantity(evidence(), price(), NOW, orders())
     assert chosen.selected_quantity % chosen.step_size == 0
-    assert (chosen.selected_quantity + chosen.step_size) * price().price > 5
+    assert (chosen.selected_quantity + chosen.step_size) * price().price > 6
     assert check_market_filters(evidence(), "BTCUSDT", Decimal("106"), NOW, price(), orders())
     assert check_market_filters(evidence(), "BTCUSDT", Decimal("0.000101"), NOW, price(), orders())
 
 
-def test_impossible_exact_five_never_increases_cap():
+def test_impossible_grid_at_six_never_increases_cap():
+    # 160000 USDT: the [5, 6] notional window holds no grid point; the cap is never widened.
     with pytest.raises(EvidenceError, match="NO_ADMISSIBLE_QUANTITY"):
-        select_quantity(evidence(), price("60000"), NOW, orders())
+        select_quantity(evidence(), price("160000"), NOW, orders())
+
+
+def test_exact_cap_boundary_is_admissible_and_one_grid_step_more_never_is():
+    chosen = select_quantity(evidence(), price("60000"), NOW, orders())
+    assert chosen.selected_quantity == Decimal("0.0001")
+    assert chosen.projected_quote_notional == Decimal("6")
+    just_above = select_quantity(evidence(), price("60000.00000001"), NOW, orders())
+    assert just_above.selected_quantity == Decimal("0.00009")
+    assert just_above.projected_quote_notional <= Decimal("6")
 
 
 @pytest.mark.parametrize(

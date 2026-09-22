@@ -24,17 +24,17 @@ from atp.exchange.filters import (
 from atp.exchange.read_only import EvidenceError
 from atp.first_testnet_order import feasibility, preparation_http
 from atp.first_testnet_order.feasibility import (
-    FIRST_ORDER_QUOTE_CAP,
     FeasibilityStatus,
     assess_quantity_feasibility,
     check_pre_watch_feasibility,
 )
+from atp.first_testnet_order.model import FIRST_ORDER_QUOTE_CAP
 from atp.first_testnet_order.preparation import select_quantity
 from atp.shared.identity import ContentIdentity
 from tests.unit.test_check_only_http import cli_module
 
 NOW = datetime(2026, 9, 15, tzinfo=UTC)
-PRICES = ("40000", "50000", "62500", "83333.33333333", "100000", "120000", "250000")
+PRICES = ("40000", "50000", "62500", "83333.33333333", "100000", "120000", "160000", "250000")
 MILLIS = int(NOW.timestamp() * 1000)
 FILTER_AGE = timedelta(minutes=15)
 
@@ -76,14 +76,14 @@ def assess(avg, projected=None, **kwargs):
 
 
 def test_average_below_projected_without_grid_solution_is_not_feasible():
-    result = assess("49000", "50000")
+    result = assess("130000", "160000")
     assert result.status is FeasibilityStatus.NOT_FEASIBLE
     assert result.reason_code == "NO_ADMISSIBLE_QUANTITY"
     assert result.witness_quantity is None
     assert result.grid_index_min > result.grid_index_max
 
 
-@pytest.mark.parametrize(("avg", "projected"), [("60000", "60000"), ("60000", "59000")])
+@pytest.mark.parametrize(("avg", "projected"), [("160000", "160000"), ("160000", "159000")])
 def test_average_not_below_projected_but_no_exact_grid_solution_is_not_feasible(avg, projected):
     result = assess(avg, projected)
     assert result.status is FeasibilityStatus.NOT_FEASIBLE
@@ -94,11 +94,13 @@ def test_average_not_below_projected_but_no_exact_grid_solution_is_not_feasible(
 @pytest.mark.parametrize(
     ("avg", "projected", "quantity"),
     [
-        ("50000", "50000", "0.0001"),
-        ("100000", "100000", "0.00005"),
-        ("62500", "62500", "0.00008"),
+        ("50000", "50000", "0.00012"),
+        ("100000", "100000", "0.00006"),
+        ("62500", "62500", "0.00009"),
+        # Exactly on the cap: 0.0001 * 60000 == 6.
+        ("60000", "60000", "0.0001"),
         # A wider window exists only when the projection is below the notional price.
-        ("50000", "49000", "0.0001"),
+        ("50000", "49000", "0.00012"),
     ],
 )
 def test_exact_valid_quantity_is_feasible(avg, projected, quantity):
@@ -107,18 +109,24 @@ def test_exact_valid_quantity_is_feasible(avg, projected, quantity):
     assert result.reason_code is None
     assert result.witness_quantity == Decimal(quantity)
     assert result.witness_quantity * Decimal(avg) >= 5
-    assert result.witness_quantity * Decimal(projected) <= 5
+    assert result.witness_quantity * Decimal(projected) <= 6
 
 
-def test_no_hidden_tolerance_or_implicit_rounding_around_the_exact_solution():
-    assert assess("50000").status is FeasibilityStatus.FEASIBLE
-    for value in ("49999.99999999", "50000.00000001", "50001", "49999"):
+def test_no_hidden_tolerance_or_implicit_rounding_around_the_cap_boundary():
+    # 0.0001 * 60000 == 6 exactly; one hundred-millionth above, one more grid step is refused.
+    assert assess("60000").witness_quantity == Decimal("0.0001")
+    assert assess("59999.99999999").witness_quantity == Decimal("0.0001")
+    above = assess("60000.00000001")
+    assert above.witness_quantity == Decimal("0.00009")
+    assert (above.witness_quantity + above.grid_step) * Decimal("60000.00000001") > 6
+    # Inside an empty window nothing is rounded into an order.
+    for value in ("160000", "160000.00000001", "166666", "150000.00000001"):
         assert assess(value).status is FeasibilityStatus.NOT_FEASIBLE
 
 
-def test_cap_remains_exactly_five_and_is_never_a_float():
+def test_cap_remains_exactly_six_and_is_never_a_float():
     assert type(FIRST_ORDER_QUOTE_CAP) is Decimal
-    assert Decimal("5") == FIRST_ORDER_QUOTE_CAP
+    assert Decimal("6") == FIRST_ORDER_QUOTE_CAP
     result = assess("50000")
     assert result.quote_cap == FIRST_ORDER_QUOTE_CAP
     # The pre-check and the real selection can never diverge on the cap.
@@ -175,7 +183,7 @@ def test_closed_form_agrees_with_brute_force_over_the_shared_filters(avg, projec
         k
         for k in range(1, limit)
         if check_market_quantity(evidence, "BTCUSDT", k * step, NOW, average) is None
-        and k * step * Decimal(projected) <= 5
+        and k * step * Decimal(projected) <= 6
     ]
     result = assess(avg, projected)
     if admissible:
@@ -220,12 +228,12 @@ def test_maximum_notional_bound_applies_when_it_is_the_binding_upper_bound():
     for item in payload["filters"]:
         if item["filterType"] == "NOTIONAL":
             item["applyMaxToMarket"] = True
-            item["maxNotional"] = "6.00000000"
+            item["maxNotional"] = "5.50000000"
     result = assess("100000", "10000", evidence=filters(payload))
     assert result.status is FeasibilityStatus.FEASIBLE
-    # The cap alone would allow 0.0005; the applicable maximum notional binds first.
-    assert result.witness_quantity == Decimal("0.00006")
-    assert result.witness_quantity * Decimal("100000") <= 6
+    # The cap alone would allow 0.0006; the applicable maximum notional binds first.
+    assert result.witness_quantity == Decimal("0.00005")
+    assert result.witness_quantity * Decimal("100000") <= Decimal("5.5")
 
 
 def test_notional_minimum_not_applied_to_market_removes_that_lower_bound():
@@ -236,7 +244,7 @@ def test_notional_minimum_not_applied_to_market_removes_that_lower_bound():
     last = price("60000", kind="EXCHANGE_LAST_PRICE", minutes=0)
     result = assess_quantity_feasibility(filters(payload), last, last, NOW)
     assert result.status is FeasibilityStatus.FEASIBLE
-    assert result.witness_quantity == Decimal("0.00008")
+    assert result.witness_quantity == Decimal("0.0001")
 
 
 # --- BLOCKED (fail-closed) evidence --------------------------------------------------
@@ -385,7 +393,7 @@ def test_runtime_reads_only_public_routes_and_reports_no_side_effects():
     report = run_check(source)
     assert report["status"] == "FEASIBLE" and report["reason_code"] is None
     assert {call[0] for call in source.calls} <= {"time", "exchangeInfo", "avgPrice"}
-    assert report["feasibility"]["witness_quantity"] == "0.0001"
+    assert report["feasibility"]["witness_quantity"] == "0.00012"
     for key, expected in {
         "strategy_evaluated": False,
         "grant_created": False,
@@ -393,17 +401,17 @@ def test_runtime_reads_only_public_routes_and_reports_no_side_effects():
         "submission_authorized": False,
         "real_economic_calls": 0,
         "LIVE": "LIVE_FORBIDDEN",
-        "quote_cap": "5",
+        "quote_cap": "6",
     }.items():
         assert report[key] == expected
     assert "strategy_signal" not in report and "activation_grant_identity" not in report
 
 
 def test_runtime_not_feasible_is_reported_and_never_relaxed():
-    report = run_check(FakeSource("83333.33333333"))
+    report = run_check(FakeSource("160000"))
     assert report["status"] == "NOT_FEASIBLE"
     assert report["reason_code"] == "NO_ADMISSIBLE_QUANTITY"
-    assert report["quote_cap"] == "5"
+    assert report["quote_cap"] == "6"
     assert report["real_economic_calls"] == 0 and report["LIVE"] == "LIVE_FORBIDDEN"
 
 
@@ -478,7 +486,7 @@ def watch_args(tmp_path):
 def test_watcher_never_starts_when_not_feasible(tmp_path, monkeypatch):
     module = cli_module()
     args = watch_args(tmp_path)
-    source = FakeSource("83333.33333333", live=True)
+    source = FakeSource("160000", live=True)
     report = module.run(args, window=object(), feasibility_source=source)
     assert report["status"] == "NOT_FEASIBLE" and report["reason_code"] == "NO_ADMISSIBLE_QUANTITY"
     assert not args.session_dir.exists()
@@ -509,7 +517,7 @@ def test_non_watch_check_only_is_not_gated(tmp_path, monkeypatch):
     module = cli_module()
     for name in ("ATP_BINANCE_TESTNET_API_KEY", "ATP_BINANCE_TESTNET_API_SECRET"):
         monkeypatch.delenv(name, raising=False)
-    source = FakeSource("83333.33333333")
+    source = FakeSource("160000")
     with pytest.raises(EvidenceError, match="CREDENTIAL_CAPABILITY_INVALID"):
         module.run(watch_args(tmp_path), window=None, feasibility_source=source)
     assert source.calls == []
@@ -517,7 +525,7 @@ def test_non_watch_check_only_is_not_gated(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     ("average", "code", "status"),
-    [("50000.00000000", 0, "FEASIBLE"), ("83333.33333333", 2, "NOT_FEASIBLE")],
+    [("50000.00000000", 0, "FEASIBLE"), ("160000.00000000", 2, "NOT_FEASIBLE")],
 )
 def test_standalone_mode_prints_report_and_exit_code(monkeypatch, capsys, average, code, status):
     module = cli_module()

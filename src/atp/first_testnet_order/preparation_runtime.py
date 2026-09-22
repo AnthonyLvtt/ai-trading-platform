@@ -35,6 +35,7 @@ from atp.first_testnet_order.execution import (
 from atp.first_testnet_order.gate import FirstOrderInputs, GateClock, GateTimeSample, _freshness
 from atp.first_testnet_order.ledger import TestnetSubmissionLedger
 from atp.first_testnet_order.model import (
+    FIRST_ORDER_QUOTE_CAP,
     FirstOrderPolicy,
     FirstTestnetOrderAuthorization,
     TrustedFirstOrderAuthorizationEvidence,
@@ -380,7 +381,7 @@ def prepare_check_only(
         ledger.content_identity,
         "BTCUSDT",
         selection.selected_quantity,
-        Decimal("5"),
+        FIRST_ORDER_QUOTE_CAP,
         at,
         at + timedelta(minutes=15),
     )
