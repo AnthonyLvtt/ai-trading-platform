@@ -2,7 +2,7 @@
 
 ATP is a modular algorithmic-trading platform. V1 targets Binance Spot, LONG only, with a single position.
 
-This repository contains the modular-monolith engineering foundation and the V1 module boundaries: Market Data, Strategy, Risk, OMS, Exchange Adapter, Accounting, Backtesting/Simulation, Observability, Web supervision, Test/Qualification, Release/Deployment and Operations, plus the Binance Spot Testnet qualification, activation-grant and first-order preparation contracts. The operator command `scripts/submit_first_testnet_order.py` is read-only (`--check-only`, `--watch`, `--pre-watch-feasibility`) and has no economic execution composition. Live trading is forbidden, and credentials are never stored in the repository.
+This repository contains the modular-monolith engineering foundation and the V1 module boundaries: Market Data, Strategy, Risk, OMS, Exchange Adapter, Accounting, Backtesting/Simulation, Observability, Web supervision, Test/Qualification, Release/Deployment and Operations, plus the Binance Spot Testnet qualification, activation-grant and first-order preparation contracts. The operator command `scripts/submit_first_testnet_order.py` keeps `--check-only`, `--watch` and `--pre-watch-feasibility` read-only. Its separate `--execute` path requires all external approvals, fresh evidence and the canonical durable campaign ledger; no submission is authorized by installation, CI or merge. See [ENG-TO-OPS-008A](docs/engineering/ENG-TO-OPS-008A-decisions.md); operational readiness remains NO-GO pending CTO review. Live trading is forbidden, and credentials are never stored in the repository.
 
 ## Requirements
 

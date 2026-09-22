@@ -11,6 +11,7 @@ from atp.exchange.transport import (
     TransportReply,
     runtime_ready,
 )
+from atp.first_testnet_order.controlled import FinalBoundary
 from atp.first_testnet_order.execution import (
     TESTNET_ENDPOINT,
     FirstOrderTransport,
@@ -28,10 +29,12 @@ class FirstOrderBinanceTestnetTransport(BinanceTestnetHTTPTransport, FirstOrderT
         credentials: ExchangeCredentialsProvider,
         credential_source_identity: ContentIdentity,
         clock: GateClock | None = None,
+        boundary: FinalBoundary | None = None,
     ) -> None:
         super().__init__(credentials)
         self._source_identity = credential_source_identity
         self._clock = clock
+        self._boundary = boundary
 
     @property
     def endpoint(self) -> str:
@@ -74,4 +77,12 @@ class FirstOrderBinanceTestnetTransport(BinanceTestnetHTTPTransport, FirstOrderT
         now = current_time()
         if now is None:
             return TransportReply(error=Reason.TESTNET_RUNTIME_BLOCKED)
-        return self._dispatch(Operation.SUBMIT, order, now, material, before_send=current_time)
+        if not isinstance(self._boundary, FinalBoundary):
+            return TransportReply(error=Reason.TESTNET_RUNTIME_BLOCKED)
+
+        def before_post() -> datetime | None:
+            if current_time() is None:
+                return None
+            return self._boundary.before_post(permit, order) if self._boundary else None
+
+        return self._dispatch(Operation.SUBMIT, order, now, material, before_send=before_post)

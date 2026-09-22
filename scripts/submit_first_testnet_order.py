@@ -1,4 +1,4 @@
-"""Operator-only preparation. This command has no economic execution composition."""
+"""Explicit operator preparation or single campaign attempt; never implicit execution."""
 
 import argparse
 import contextlib
@@ -13,10 +13,14 @@ from queue import Empty, Queue
 from threading import Event, Thread
 
 from atp.exchange.read_only import EvidenceError, encoded
+from atp.first_testnet_order.controlled import operational_ledger
 from atp.first_testnet_order.feasibility import check_pre_watch_feasibility
 from atp.first_testnet_order.ledger import TestnetSubmissionLedger
 from atp.first_testnet_order.preparation_http import PublicTestnetSource, TestnetReadOnlySource
-from atp.first_testnet_order.preparation_runtime import prepare_check_only
+from atp.first_testnet_order.preparation_runtime import (
+    prepare_check_only,
+    prepare_operator_execution,
+)
 from atp.first_testnet_order.watcher import WatchWindow, watch_check_only
 from atp.release_deployment.source import inspect_source
 from atp.shared.errors import ValidationError
@@ -85,7 +89,7 @@ def pre_watch_feasibility(source=None):
 
 def run(args, window=None, feasibility_source=None):
     if (
-        not (args.check_only or getattr(args, "prepare", False))
+        not (args.check_only or getattr(args, "prepare", False) or getattr(args, "execute", False))
         or not args.confirm_testnet_permissions
     ):
         return {
@@ -101,6 +105,9 @@ def run(args, window=None, feasibility_source=None):
         if feasibility["status"] != "FEASIBLE":
             return feasibility
         feasibility_identity = feasibility["feasibility_identity"]
+    campaign = operational_ledger() if getattr(args, "execute", False) else None
+    if campaign is not None and campaign.inspect_campaign():
+        raise EvidenceError("FIRST_ORDER_ALREADY_CONSUMED")
     root = Path.cwd().resolve()
     session = args.session_dir.resolve()
     if root == session or root in session.parents or session.exists():
@@ -193,7 +200,9 @@ def run(args, window=None, feasibility_source=None):
         credential_source_identity=reference.content_identity,
         credential_authority=authority,
         workspace=session,
-        ledger=TestnetSubmissionLedger.create(session / "submission.sqlite"),
+        ledger=campaign
+        if campaign is not None
+        else TestnetSubmissionLedger.create(session / "submission.sqlite"),
         artifact_sink=save,
         trust_pin_source=lambda kind: read_external_pin(args, kind, window),
     )
@@ -203,6 +212,10 @@ def run(args, window=None, feasibility_source=None):
             window=window,
             report_sink=lambda item: print(json.dumps(item, sort_keys=True), flush=True),
             source_check=source_check,
+        )
+    elif getattr(args, "execute", False):
+        report = prepare_operator_execution(
+            **arguments, now=lambda: datetime.now(UTC), credentials=provider
         )
     else:
         report = prepare_check_only(**arguments, now=lambda: datetime.now(UTC))
@@ -214,7 +227,10 @@ def run(args, window=None, feasibility_source=None):
         capability_evidence_identity=str(capability.content_identity),
     )
     if inspect_source(root) != releases[0][0].source:
-        raise EvidenceError("RELEASE_BINDING_REQUIRED")
+        if getattr(args, "execute", False):
+            report["source_changed_after_action"] = True
+        else:
+            raise EvidenceError("RELEASE_BINDING_REQUIRED")
     return report
 
 
@@ -223,7 +239,11 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check-only", action="store_true")
     mode.add_argument("--prepare", action="store_true")
-    mode.add_argument("--execute", action="store_true", help="Unavailable in this composition")
+    mode.add_argument(
+        "--execute",
+        action="store_true",
+        help="Explicit one-shot action requiring the canonical campaign ledger and external pins",
+    )
     mode.add_argument(
         "--pre-watch-feasibility",
         action="store_true",
@@ -266,7 +286,7 @@ def main() -> int:
         print(json.dumps(report, sort_keys=True))
         return 0 if report["status"] == "FEASIBLE" else 2
     if (
-        (args.check_only or args.prepare)
+        (args.check_only or args.prepare or args.execute)
         and args.confirm_testnet_permissions
         and not all((args.source_commit, args.release_version, args.session_dir))
     ):
@@ -318,7 +338,7 @@ def main() -> int:
     finally:
         for sig, handler in handlers.items():
             signal.signal(sig, handler)
-    report["transport_call_count"] = 0
+    report.setdefault("transport_call_count", 0)
     print(json.dumps(report, sort_keys=True))
     return 0 if report["status"] == "READY_TO_SUBMIT" else 2
 

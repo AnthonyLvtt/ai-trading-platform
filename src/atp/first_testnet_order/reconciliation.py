@@ -9,6 +9,7 @@ from atp.exchange.read_only import (
     ExchangeFill,
     ExchangeOrderStatus,
     ReconciliationLookup,
+    decimal_field,
     encoded,
     parse_reconciliation,
     verify_record,
@@ -36,6 +37,9 @@ class ReconciledExchangeExecutionEvidence(EvidenceRecord):
     cumulative_quote_quantity: Decimal
     reconciliation_source_identity: ContentIdentity
     reconciliation_time: datetime
+    authorization_identity: ContentIdentity
+    submission_ledger_identity: ContentIdentity
+    reservation_identity: ContentIdentity
     environment: str = "TESTNET"
 
 
@@ -48,7 +52,10 @@ def reconcile_first_order(
         return FirstOrderResult(Reason.FIRST_ORDER_NOT_READY), None
     assert isinstance(authorization, FirstTestnetOrderAuthorization)
     auth = authorization
+    if ledger.content_identity != auth.submission_ledger_identity:
+        return FirstOrderResult(Reason.SUBMISSION_LEDGER_UNAVAILABLE), None
     try:
+        reservation = ledger.reservation_identity(auth.content_identity, auth.client_order_id)
         if not ledger.consumed(auth.content_identity, auth.client_order_id):
             return FirstOrderResult(Reason.FIRST_ORDER_NOT_READY), None
         result = parse_reconciliation(
@@ -88,6 +95,18 @@ def reconcile_first_order(
                 (f.quote_quantity for f in snapshot.fills if f.quote_quantity is not None),
                 Decimal(0),
             )
+        if isinstance(order_payload, dict) and "cummulativeQuoteQty" in order_payload:
+            try:
+                if decimal_field(order_payload["cummulativeQuoteQty"]) != quote:
+                    return FirstOrderResult(
+                        Reason.SUBMISSION_STATE_UNKNOWN,
+                        SubmissionState.UNKNOWN,
+                        auth.content_identity,
+                    ), None
+            except ValueError:
+                return FirstOrderResult(
+                    Reason.SUBMISSION_STATE_UNKNOWN, SubmissionState.UNKNOWN, auth.content_identity
+                ), None
         if (
             base != snapshot.executed_quantity
             or (snapshot.status is ExchangeOrderStatus.FILLED and base != auth.quantity)
@@ -110,6 +129,9 @@ def reconcile_first_order(
             quote,
             snapshot.source_identity,
             at,
+            auth.content_identity,
+            ledger.content_identity,
+            reservation,
         )
         ledger.append(
             auth.content_identity,

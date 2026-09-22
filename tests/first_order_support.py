@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from atp.exchange.filters import NotionalPriceEvidence
+from atp.exchange.filters import NotionalPriceEvidence, parse_open_orders
 from atp.exchange.model import decimal_text
 from atp.exchange.transport import TransportReply
 from atp.first_testnet_order.execution import (
@@ -136,7 +136,13 @@ def first_order(activation, tmp_path):
     )
     chain.pop("at")
     chain["filters"] = replace(chain["filters"], observed_at=NOW)
-    values = FirstOrderInputs(auth, receipt, **chain, price=price)
+    values = FirstOrderInputs(
+        auth,
+        receipt,
+        **chain,
+        price=price,
+        open_orders=parse_open_orders([], "BTCUSDT", NOW, complete=True),
+    )
     return values, dict(
         clock=SyntheticClock(),
         ledger=ledger,
