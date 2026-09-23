@@ -177,6 +177,80 @@ def prepare_check_only(
     trust_pin_source: Callable[[str], ContentIdentity | None] | None = None,
     activation_grant: TestnetActivationGrant | None = None,
 ) -> dict[str, object]:
+    """Preparation only; no execution dependency can be supplied."""
+    return _prepare(
+        source=source,
+        now=now,
+        release=release,
+        wheel=wheel,
+        tq=tq,
+        tq_evidence=tq_evidence,
+        credential_source_identity=credential_source_identity,
+        credential_authority=credential_authority,
+        workspace=workspace,
+        ledger=ledger,
+        artifact_sink=artifact_sink,
+        trust_pin_source=trust_pin_source,
+        activation_grant=activation_grant,
+    )
+
+
+def prepare_operator_execution(
+    *,
+    credentials: object,
+    source_root: Path,
+    source: ReadOnlySource,
+    now: Callable[[], datetime],
+    release: ReleaseBundle,
+    wheel: bytes,
+    tq: TestnetQualificationSuiteResult,
+    tq_evidence: TestnetCapabilityEvidence,
+    credential_source_identity: ContentIdentity,
+    credential_authority: CredentialCapabilityAuthority,
+    workspace: Path,
+    ledger: TestnetSubmissionLedger,
+    artifact_sink: Callable[[str, object], None] | None = None,
+    trust_pin_source: Callable[[str], ContentIdentity | None] | None = None,
+    activation_grant: TestnetActivationGrant | None = None,
+) -> dict[str, object]:
+    """Explicit operator action, retaining all external approvals in this process."""
+    return _prepare(
+        execution_credentials=credentials,
+        execution_source_root=source_root,
+        source=source,
+        now=now,
+        release=release,
+        wheel=wheel,
+        tq=tq,
+        tq_evidence=tq_evidence,
+        credential_source_identity=credential_source_identity,
+        credential_authority=credential_authority,
+        workspace=workspace,
+        ledger=ledger,
+        artifact_sink=artifact_sink,
+        trust_pin_source=trust_pin_source,
+        activation_grant=activation_grant,
+    )
+
+
+def _prepare(
+    *,
+    execution_credentials: object = None,
+    execution_source_root: Path | None = None,
+    source: ReadOnlySource,
+    now: Callable[[], datetime],
+    release: ReleaseBundle,
+    wheel: bytes,
+    tq: TestnetQualificationSuiteResult,
+    tq_evidence: TestnetCapabilityEvidence,
+    credential_source_identity: ContentIdentity,
+    credential_authority: CredentialCapabilityAuthority,
+    workspace: Path,
+    ledger: TestnetSubmissionLedger,
+    artifact_sink: Callable[[str, object], None] | None = None,
+    trust_pin_source: Callable[[str], ContentIdentity | None] | None = None,
+    activation_grant: TestnetActivationGrant | None = None,
+) -> dict[str, object]:
     """No execute option. Every proof belongs to this evaluation, never a cached Risk result."""
     # Establish capabilities before any network read, independently of account responses.
     credential_authority.attest(credential_source_identity)
@@ -434,27 +508,21 @@ def prepare_check_only(
         open_orders = parse_open_orders(refreshed, "BTCUSDT", now(), complete=True)
         if open_orders.source_identity != portfolio.orders_identity:
             raise EvidenceError("PORTFOLIO_STATE_UNKNOWN")
-    result = run_first_order(
-        FirstOrderInputs(
-            authorization,
-            receipt,
-            proof,
-            risk.decision,
-            strategy,
-            grant,
-            context,
-            ops,
-            release,
-            wheel,
-            promotion,
-            filters,
-            price,
-            open_orders,
-        ),
-        clock=clock,
-        ledger=ledger,
-        transport=CheckOnlyTransport(credential_source_identity),
-        execute=False,
+    first_inputs = FirstOrderInputs(
+        authorization,
+        receipt,
+        proof,
+        risk.decision,
+        strategy,
+        grant,
+        context,
+        ops,
+        release,
+        wheel,
+        promotion,
+        filters,
+        price,
+        open_orders,
     )
     if artifact_sink is not None:
         for name, artifact in (
@@ -465,7 +533,32 @@ def prepare_check_only(
             ("strategy-evaluation", strategy),
         ):
             artifact_sink(name, artifact)
+    if execution_credentials is not None:
+        from atp.first_testnet_order.controlled import execute_controlled
+
+        if execution_source_root is None:
+            raise EvidenceError("RELEASE_BINDING_REQUIRED")
+        result = execute_controlled(
+            first_inputs,
+            portfolio,
+            source=source,
+            clock=clock,
+            now=now,
+            ledger=ledger,
+            credentials=execution_credentials,
+            source_root=execution_source_root,
+        )
+    else:
+        result = run_first_order(
+            first_inputs,
+            clock=clock,
+            ledger=ledger,
+            transport=CheckOnlyTransport(credential_source_identity),
+            execute=False,
+        )
     report.update(
+        real_economic_calls=result.transport_call_count,
+        transport_call_count=result.transport_call_count,
         status=result.status,
         reason_code=result.reason_code.value,
         quantity_selection=encoded(selection),

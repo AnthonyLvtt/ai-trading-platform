@@ -544,7 +544,11 @@ def test_deadline_rechecked_after_transport_preparation(first_order, monkeypatch
         return CredentialMaterial("synthetic", "synthetic")
 
     provider.load.side_effect = load
-    http = FirstOrderBinanceTestnetTransport(provider, deps["transport"].source, deps["clock"])
+    from atp.first_testnet_order.controlled import FinalBoundary
+
+    http = FirstOrderBinanceTestnetTransport(
+        provider, deps["transport"].source, deps["clock"], Mock(spec=FinalBoundary)
+    )
     connection = Mock()
     connection.connect.side_effect = lambda: setattr(
         deps["clock"], "at", NOW + timedelta(seconds=11)

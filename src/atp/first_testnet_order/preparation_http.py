@@ -16,15 +16,17 @@ ROUTES = frozenset(
 
 
 class TestnetReadOnlySource:
+    resources = ROUTES
+
     def __init__(self, provider: ReferencedEnvironmentCredentialsProvider) -> None:
         self._provider = provider
 
     def read(self, resource: str, parameters: tuple[tuple[str, str], ...] = ()) -> object:
-        if resource not in ROUTES:
+        if resource not in self.resources:
             raise EvidenceError("FIRST_ORDER_NOT_READY")
         query = urlencode(parameters)
         headers = {}
-        if resource in ("account", "openOrders"):
+        if resource in ("account", "openOrders", "order", "myTrades"):
             material = self._provider.load()
             if material is None:
                 raise EvidenceError("CREDENTIAL_CAPABILITY_INVALID")
@@ -77,3 +79,9 @@ def _get(resource: str, query: str, headers: dict[str, str]) -> object:
         raise EvidenceError("READ_ONLY_SOURCE_UNAVAILABLE") from None
     finally:
         connection.close()
+
+
+class ReconciliationReadOnlySource(TestnetReadOnlySource):
+    """Explicit signed GET-only lookup; no submit, retry, cancel or withdrawal route."""
+
+    resources = frozenset({"order", "myTrades"})

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
-from atp.exchange.filters import NotionalPriceEvidence, SymbolFilterEvidence
+from atp.exchange.filters import NotionalPriceEvidence, OpenOrdersEvidence, SymbolFilterEvidence
 from atp.exchange.model import ExchangeOrderRequest, Status, valid
 from atp.exchange.model import Reason as ExchangeReason
 from atp.exchange.read_only import EvidenceRecord, encoded, verify_record
@@ -51,6 +51,8 @@ class SubmissionPermit(EvidenceRecord):
     authorization_valid_until: datetime
     price_fresh_until: datetime
     filter_fresh_until: datetime
+    open_orders_fresh_until: datetime | None = None
+    open_orders_complete: bool = False
 
 
 def submission_permit_time(permit: object, clock: object) -> datetime | None:
@@ -68,7 +70,10 @@ def submission_permit_time(permit: object, clock: object) -> datetime | None:
     now = sample.gate_evaluation_time
     evidence = sample.evidence
     if (
-        now.tzinfo is not UTC
+        permit.open_orders_complete is not True
+        or permit.open_orders_fresh_until is None
+        or now > permit.open_orders_fresh_until
+        or now.tzinfo is not UTC
         or now < permit.at
         or evidence.local_observed_at > now
         or abs(evidence.server_time - evidence.local_observed_at) > timedelta(seconds=5)
@@ -206,13 +211,16 @@ def run_first_order(
         min(auth.valid_until, ctx.validity_end),
         inputs.price.effective_at + timedelta(seconds=10),
         inputs.filters.observed_at + timedelta(minutes=15),
+        getattr(inputs.open_orders, "observed_at", at - timedelta(days=1)) + timedelta(seconds=10),
+        verify_record(inputs.open_orders, OpenOrdersEvidence)
+        and getattr(inputs.open_orders, "complete", False) is True,
     )
     with _permit_lock:
         _permits[id(permit)] = (permit, permit.content_identity)
     try:
         try:
             reply = transport.submit(permit, order, at, inputs.readiness)
-        except (OSError, TimeoutError):
+        except (OSError, TimeoutError, ValueError):
             # No exception text is retained. Attempt remains consumed even on lost response.
             reply = None
     finally:

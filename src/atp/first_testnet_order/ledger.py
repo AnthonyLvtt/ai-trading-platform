@@ -75,7 +75,12 @@ class TestnetSubmissionLedger:
         return ledger
 
     def _connect(self) -> sqlite3.Connection:
-        if not self.path.is_file() or self.path.is_symlink():
+        if (
+            not self.path.is_file()
+            or self.path.is_symlink()
+            or not self.path.stat().st_mode & 0o200
+            or not os.access(self.path, os.W_OK)
+        ):
             raise LedgerUnavailable("Ledger unavailable")
         db = sqlite3.connect(self.path.as_uri() + "?mode=rw", uri=True, timeout=5)
         db.execute("PRAGMA synchronous=FULL")
@@ -118,11 +123,37 @@ class TestnetSubmissionLedger:
     def consumed(self, authorization: ContentIdentity, client: str) -> bool:
         try:
             with closing(self._connect()) as db:
-                return any(
-                    row[0] == str(authorization) or row[1] == client for row in self._inspect(db)
-                )
+                return bool(self._inspect(db))
         except (OSError, sqlite3.Error, ValueError):
             raise LedgerUnavailable("Ledger unavailable") from None
+
+    def reservation_identity(self, authorization: ContentIdentity, client: str) -> ContentIdentity:
+        """Exact durable reservation, including the canonical ledger path."""
+        try:
+            with closing(self._connect()) as db:
+                rows = self._inspect(db)
+                reservations = [r for r in rows if r[2] == SubmissionState.ATTEMPT_STARTED]
+                if len(reservations) != 1:
+                    raise LedgerUnavailable("Campaign reservation unavailable")
+                row = reservations[0]
+                if row[0] != str(authorization) or row[1] != client:
+                    raise LedgerUnavailable("Campaign reservation mismatch")
+                return ContentIdentity.from_canonical([str(self.content_identity), row[-1]])
+        except (OSError, sqlite3.Error, ValueError):
+            raise LedgerUnavailable("Campaign reservation unavailable") from None
+
+    def inspect_campaign(self) -> bool:
+        """Read-only integrity review; True means the entire campaign is consumed."""
+        try:
+            with closing(self._connect()) as db:
+                if db.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                    raise LedgerUnavailable("Ledger integrity failure")
+                rows = self._inspect(db)
+                if sum(r[2] == SubmissionState.ATTEMPT_STARTED for r in rows) > 1:
+                    raise LedgerUnavailable("Multiple historical campaign attempts")
+                return bool(rows)
+        except (OSError, sqlite3.Error, ValueError):
+            raise LedgerUnavailable("Ledger inspection failed") from None
 
     def append(
         self,
@@ -137,7 +168,7 @@ class TestnetSubmissionLedger:
                 db.execute("BEGIN IMMEDIATE")
                 rows = self._inspect(db)
                 matching = [r for r in rows if r[0] == str(authorization) or r[1] == client]
-                if state is SubmissionState.ATTEMPT_STARTED and matching:
+                if state is SubmissionState.ATTEMPT_STARTED and rows:
                     raise AlreadyConsumed("Authorization consumed")
                 if state is not SubmissionState.ATTEMPT_STARTED and not matching:
                     raise LedgerUnavailable("No reserved attempt")
