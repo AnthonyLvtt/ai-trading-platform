@@ -80,6 +80,7 @@ def harness(
     grant=None,
     pin_mode="exact",
     second_mode="exact",
+    prepare_first_order=False,
     after_pin=None,
     stop_after=None,
 ):
@@ -129,6 +130,7 @@ def harness(
         report_sink=report,
         source_check=lambda: None,
         activation_grant=grant,
+        prepare_first_order=prepare_first_order,
     )
     assert result["real_economic_calls"] == 0
     assert result["transport_call_count"] == 0
@@ -137,8 +139,14 @@ def harness(
 
 
 @pytest.mark.parametrize("mode", ["missing", "wrong"])
-def test_external_pin_required_before_strategy(activation, tmp_path, mode):
-    result, source, _, prompts, _, _ = harness(activation, tmp_path, pin_mode=mode)
+@pytest.mark.parametrize("prepare_first_order", [False, True])
+def test_external_pin_required_before_strategy(activation, tmp_path, mode, prepare_first_order):
+    result, source, _, prompts, _, _ = harness(
+        activation,
+        tmp_path,
+        pin_mode=mode,
+        prepare_first_order=prepare_first_order,
+    )
     assert result["reason_code"] == "TRUST_PIN_REQUIRED"
     assert source.evaluations == []
     assert prompts == ["activation-grant"]
@@ -157,6 +165,19 @@ def test_repeated_no_action_exit_retains_one_grant_and_expires(activation, tmp_p
     assert all(r["status"] == "NOT_READY" and r["real_economic_calls"] == 0 for r in reports)
     assert reports[1]["strategy_signal"] == "EXIT"
     assert source.evaluations == [NOW + timedelta(minutes=5 * n) for n in range(6)]
+    assert "first-order-authorization" not in artifacts
+
+
+def test_preparation_watcher_grant_expiry_stops_without_second_pin(activation, tmp_path):
+    result, _, artifacts, prompts, _, clock = harness(
+        activation,
+        tmp_path,
+        signals=("NO_ACTION", "EXIT"),
+        prepare_first_order=True,
+    )
+    assert result["reason_code"] == "ACTIVATION_GRANT_EXPIRED"
+    assert clock.at == artifacts["activation-grant"].validity_end
+    assert prompts == ["activation-grant"]
     assert "first-order-authorization" not in artifacts
 
 
@@ -201,6 +222,55 @@ def test_real_crossover_runs_gates_and_requires_second_pin(
         assert result["ledger_state"] == "NOT_ATTEMPTED"
     else:
         assert result["reason_code"] == "TRUST_PIN_REQUIRED"
+
+
+def test_preparation_watcher_stops_at_candidate_without_second_pin(
+    activation, tmp_path, monkeypatch
+):
+    from atp.first_testnet_order import controlled, preparation_runtime
+
+    monkeypatch.setattr(
+        preparation_runtime,
+        "trust_first_order",
+        lambda *args, **kwargs: pytest.fail("First-order trust receipt must not be created"),
+    )
+    monkeypatch.setattr(
+        controlled,
+        "execute_controlled",
+        lambda *args, **kwargs: pytest.fail("Economic execution must not be invoked"),
+    )
+    result, _, artifacts, prompts, reports, _ = harness(
+        activation,
+        tmp_path,
+        signals=("NO_ACTION", "LONG_ENTRY"),
+        prepare_first_order=True,
+    )
+    authorization = artifacts["first-order-authorization"]
+    context = next(
+        artifact
+        for name, artifact in artifacts.items()
+        if name.endswith("runtime-authorization-context")
+    )
+    grant = artifacts["activation-grant"]
+
+    assert result["status"] == "READY_FOR_CTO_REVIEW"
+    assert result["reason_code"] == "FIRST_ORDER_AUTHORIZATION_REVIEW_REQUIRED"
+    assert result["first_order_identity"] == str(authorization.content_identity)
+    assert result["ledger_state"] == "NOT_ATTEMPTED"
+    assert result["transport_call_count"] == result["real_economic_calls"] == 0
+    assert prompts == ["activation-grant"]
+    assert len(reports) == 1 and reports[0]["strategy_signal"] == "NO_ACTION"
+    assert authorization.activation_grant_identity == grant.content_identity
+    assert authorization.runtime_authorization_context_identity == context.content_identity
+    assert context.credential_source_identity == activation["credential_source_identity"]
+    assert {
+        "quantity-selection",
+        "open-orders-evidence",
+        "portfolio-evidence",
+        "upstream-proof",
+        "strategy-evaluation",
+    } <= {name.split("-", 2)[-1] for name in artifacts}
+    assert TestnetSubmissionLedger(tmp_path / "watch.sqlite").inspect_campaign() is False
 
 
 @pytest.mark.parametrize("kind", ["activation-grant", "first-order-authorization"])
@@ -304,7 +374,10 @@ def test_existing_exposure_does_not_request_second_pin(activation, tmp_path, mon
     assert "first-order-authorization" not in artifacts
 
 
-def test_stale_price_before_candidate_never_requests_pin(activation, tmp_path, monkeypatch):
+@pytest.mark.parametrize("prepare_first_order", [False, True])
+def test_stale_price_before_candidate_never_requests_pin(
+    activation, tmp_path, monkeypatch, prepare_first_order
+):
     original = Source.read
 
     def stale(self, resource, parameters=()):
@@ -314,19 +387,30 @@ def test_stale_price_before_candidate_never_requests_pin(activation, tmp_path, m
         return result
 
     monkeypatch.setattr(Source, "read", stale)
-    result, _, artifacts, prompts, _, _ = harness(activation, tmp_path, signals=("LONG_ENTRY",))
+    result, _, artifacts, prompts, _, _ = harness(
+        activation,
+        tmp_path,
+        signals=("LONG_ENTRY",),
+        prepare_first_order=prepare_first_order,
+    )
     assert result["reason_code"] == "PRICE_EVIDENCE_STALE"
     assert prompts == ["activation-grant"]
     assert "first-order-authorization" not in artifacts
 
 
-def test_live_grant_never_evaluates_strategy(activation, tmp_path):
+@pytest.mark.parametrize("prepare_first_order", [False, True])
+def test_live_grant_never_evaluates_strategy(activation, tmp_path, prepare_first_order):
     grant = replace(
         activation["grant"], validity_start=NOW, validity_end=NOW + timedelta(minutes=30)
     )
     object.__setattr__(grant, "allowed_environment", "LIVE")
     with pytest.raises(EvidenceError, match="LIVE_FORBIDDEN"):
-        harness(activation, tmp_path, grant=grant)
+        harness(
+            activation,
+            tmp_path,
+            grant=grant,
+            prepare_first_order=prepare_first_order,
+        )
 
 
 def test_expiry_between_scheduled_closes_cancels_next_tick(activation, tmp_path):
