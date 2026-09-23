@@ -198,6 +198,7 @@ def prepare_check_only(
 def prepare_operator_execution(
     *,
     credentials: object,
+    source_root: Path,
     source: ReadOnlySource,
     now: Callable[[], datetime],
     release: ReleaseBundle,
@@ -215,6 +216,7 @@ def prepare_operator_execution(
     """Explicit operator action, retaining all external approvals in this process."""
     return _prepare(
         execution_credentials=credentials,
+        execution_source_root=source_root,
         source=source,
         now=now,
         release=release,
@@ -234,6 +236,7 @@ def prepare_operator_execution(
 def _prepare(
     *,
     execution_credentials: object = None,
+    execution_source_root: Path | None = None,
     source: ReadOnlySource,
     now: Callable[[], datetime],
     release: ReleaseBundle,
@@ -533,6 +536,8 @@ def _prepare(
     if execution_credentials is not None:
         from atp.first_testnet_order.controlled import execute_controlled
 
+        if execution_source_root is None:
+            raise EvidenceError("RELEASE_BINDING_REQUIRED")
         result = execute_controlled(
             first_inputs,
             portfolio,
@@ -541,6 +546,7 @@ def _prepare(
             now=now,
             ledger=ledger,
             credentials=execution_credentials,
+            source_root=execution_source_root,
         )
     else:
         result = run_first_order(

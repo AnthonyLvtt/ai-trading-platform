@@ -31,6 +31,8 @@ from atp.first_testnet_order.preparation import (
     portfolio_evidence,
     portfolio_for_risk,
 )
+from atp.release_deployment.model import ReleaseBundle
+from atp.release_deployment.source import inspect_source
 from atp.risk import DeterministicRiskEngine, RiskEvaluationContext, RiskPolicy, RiskStatus
 from atp.risk.model import RiskDecision
 from atp.shared.identity import ContentIdentity
@@ -69,9 +71,11 @@ class FinalBoundary:
         inputs: FirstOrderInputs,
         portfolio: TestnetPortfolioEvidence,
         ledger: TestnetSubmissionLedger,
+        source_root: Path,
     ) -> None:
         self.source, self.clock, self.now = source, clock, now
         self.inputs, self.portfolio, self.ledger = inputs, portfolio, ledger
+        self.source_root = source_root
         self.refreshed: FirstOrderInputs | None = None
         self.account_at: datetime | None = None
         self.permit_identity: ContentIdentity | None = None
@@ -227,7 +231,13 @@ class FinalBoundary:
     def before_post(self, permit: SubmissionPermit, order: ExchangeOrderRequest) -> datetime | None:
         try:
             auth = self.inputs.authorization
-            if not isinstance(auth, FirstTestnetOrderAuthorization):
+            release = self.inputs.release
+            if (
+                not isinstance(auth, FirstTestnetOrderAuthorization)
+                or not isinstance(release, ReleaseBundle)
+                or not self.source_root.is_absolute()
+                or inspect_source(self.source_root) != release.source
+            ):
                 return None
             canonical = operational_ledger()
             if (
@@ -263,6 +273,7 @@ def execute_controlled(
     now: Callable[[], datetime],
     ledger: TestnetSubmissionLedger,
     credentials: object,
+    source_root: Path,
 ) -> FirstOrderResult:
     from atp.exchange.first_order_transport import FirstOrderBinanceTestnetTransport
     from atp.testnet_activation.runtime_credentials import ReferencedEnvironmentCredentialsProvider
@@ -281,7 +292,7 @@ def execute_controlled(
             or credentials.reference.content_identity != ctx.credential_source_identity
         ):
             return FirstOrderResult(Reason.FIRST_ORDER_NOT_READY)
-        boundary = FinalBoundary(source, clock, now, inputs, portfolio, ledger)
+        boundary = FinalBoundary(source, clock, now, inputs, portfolio, ledger, source_root)
         fresh = boundary.refresh()
         transport = FirstOrderBinanceTestnetTransport(
             credentials, ctx.credential_source_identity, clock, boundary

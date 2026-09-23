@@ -70,10 +70,15 @@ checks require nonfuture complete evidence, valid through exactly 10 seconds.
 The transport permit carries complete-openOrders and its inclusive expiration:
 exactly 10 seconds valid, greater than 10 blocked. It retains the existing exclusive
 price/filter/authorization transport deadlines. The final callback checks evidence
-and trusted clock again immediately before the HTTP request write. A refresh does
-not extend the original permit deadlines: if either original or refreshed evidence
-fails, there is no POST. A failure after ATTEMPT_STARTED leaves the campaign consumed
-and returns UNKNOWN, including when the economic call count is zero.
+and trusted clock again immediately before the HTTP request write. It also inspects
+the current checkout and requires its complete `SourceTree` to equal the source
+approved by the bound `ReleaseBundle`. Inspection failure, a dirty checkout, a changed
+commit/tree/file inventory, or any other mismatch blocks before request write. This
+source check runs inside `FinalBoundary`, after durable reservation, both after connect
+and again at the transport's immediate write callback; it is not a post-action warning.
+A refresh does not extend the original permit deadlines: if either original or
+refreshed evidence fails, there is no POST. A failure after ATTEMPT_STARTED leaves the
+campaign consumed and returns UNKNOWN, including when the economic call count is zero.
 
 `UNKNOWN` never retries or releases a reservation. Crashes leave the durable attempt
 consumed. A new session or newly approved authorization cannot submit another order.
@@ -115,7 +120,12 @@ Offline coverage includes all missing gates, post-connection exposure changes,
 stale price/orders/account, exact openOrders deadline, old cap/pin, authorization
 mismatch, notional over cap, commit failure, restart and two independent processes
 contending with different authorizations, UNKNOWN, copied ledger and reconciliation
-identity/quote mismatches. Existing crash/expiry tests remain active.
+identity/quote mismatches. Source coverage proves an unchanged checkout reaches only
+the synthetic POST boundary, while a change or inspection failure after reservation
+produces zero POST, consumes the campaign and cannot retry. A change between the two
+transport callbacks is also blocked at the immediate request-write check. Check-only
+does not acquire this economic source-boundary dependency. Existing crash/expiry tests
+remain active.
 
 Delivery requires Ruff, strict mypy, full pytest, ATP and TQ on the committed HEAD,
 and a draft PR. Tests passing does not provision the production ledger, validate

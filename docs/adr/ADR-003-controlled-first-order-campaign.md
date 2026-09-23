@@ -14,8 +14,11 @@ No execution entry point provisions, selects an alternate journal, or resets his
 
 The HTTP boundary additionally refreshes evidence after connection establishment,
 rechecks Risk and the existing gates without changing approved order facts, and
-checks deadlines at request write. Any failure blocks; a reservation already made
-remains consumed. Reconciliation binds the reserved authorization/client and ledger.
+checks deadlines at request write. The same trusted boundary inspects the current
+source at the immediate pre-write callback and requires exact equality with the source
+approved by the Release. Any inspection failure or mismatch blocks; a reservation
+already made remains consumed. Reconciliation binds the reserved authorization/client
+and ledger.
 
 The 6 USDT cap is projected before submission, not a final MARKET execution-spend
 guarantee. Its acceptance is limited to Testnet V1. Live, withdrawal, cancellation,

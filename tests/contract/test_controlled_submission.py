@@ -56,6 +56,19 @@ def operator(activation, tmp_path, monkeypatch):
     provider = ReferencedEnvironmentCredentialsProvider(reference)
     path = tmp_path / "campaign.sqlite"
     monkeypatch.setattr(controlled, "OPERATIONAL_LEDGER_PATH", path)
+    source_state = {"value": activation["release"].source, "calls": 0, "sequence": []}
+
+    def inspect(root):
+        source_state["calls"] += 1
+        if source_state["sequence"]:
+            value = source_state["sequence"].pop(0)
+        else:
+            value = source_state["value"]
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    monkeypatch.setattr(controlled, "inspect_source", inspect)
     ledger = TestnetSubmissionLedger.create(path)
     artifacts = {}
     clock = [NOW]
@@ -100,6 +113,10 @@ def operator(activation, tmp_path, monkeypatch):
         def connect(self):
             if http_fault[0] == "changed_after_connect":
                 source.fault = "risk"
+            elif http_fault[0] == "source_changed_after_connect":
+                source_state["value"] = replace(activation["release"].source, clean=False)
+            elif http_fault[0] == "source_inspection_failed":
+                source_state["value"] = OSError("synthetic source inspection failure")
 
         def request(self, method, path, body=None, headers=None):
             assert method == "POST" and path == "/api/v3/order"
@@ -149,11 +166,12 @@ def operator(activation, tmp_path, monkeypatch):
         artifact_sink=lambda kind, obj: artifacts.__setitem__(kind, obj),
         trust_pin_source=pin,
     )
-    return kwargs, provider, source, artifacts, posts, http_fault, clock
+    kwargs["source_root"] = tmp_path.resolve()
+    return kwargs, provider, source, artifacts, posts, http_fault, clock, source_state
 
 
 def test_operator_refreshes_after_connect_and_submits_once(operator):
-    kwargs, provider, source, artifacts, posts, _, _ = operator
+    kwargs, provider, source, artifacts, posts, _, _, _ = operator
     report = preparation_runtime.prepare_operator_execution(**kwargs, credentials=provider)
     assert report["status"] == "ACKNOWLEDGED", report
     assert len(posts) == 1 and source.accounts == 3
@@ -169,7 +187,7 @@ def test_operator_refreshes_after_connect_and_submits_once(operator):
     "fault", ["price", "account_slow", "orders_slow", "risk", "partial_orders"]
 )
 def test_final_refresh_blocks_without_reservation(operator, fault):
-    kwargs, provider, source, _, posts, _, _ = operator
+    kwargs, provider, source, _, posts, _, _, _ = operator
     source.fault = fault
     result = preparation_runtime.prepare_operator_execution(**kwargs, credentials=provider)
     assert result["status"] == "BLOCKED", result
@@ -177,15 +195,56 @@ def test_final_refresh_blocks_without_reservation(operator, fault):
 
 
 def test_changed_account_after_connect_never_posts(operator):
-    kwargs, provider, _, _, posts, fault, _ = operator
+    kwargs, provider, _, _, posts, fault, _, _ = operator
     fault[0] = "changed_after_connect"
     result = preparation_runtime.prepare_operator_execution(**kwargs, credentials=provider)
     assert result["status"] == "UNKNOWN", result
     assert not posts and kwargs["ledger"].inspect_campaign()
 
 
+def test_source_unchanged_at_final_boundary_reaches_synthetic_post(operator):
+    kwargs, provider, _, _, posts, _, _, source_state = operator
+    result = preparation_runtime.prepare_operator_execution(**kwargs, credentials=provider)
+    assert result["status"] == "ACKNOWLEDGED" and len(posts) == 1
+    # The source is inspected after connect and again immediately before request write.
+    assert source_state["calls"] == 2
+
+
+@pytest.mark.parametrize("fault", ["source_changed_after_connect", "source_inspection_failed"])
+def test_source_failure_after_reservation_blocks_post_and_consumes_campaign(operator, fault):
+    kwargs, provider, _, _, posts, http_fault, _, _ = operator
+    http_fault[0] = fault
+    result = preparation_runtime.prepare_operator_execution(**kwargs, credentials=provider)
+    assert result["status"] == "UNKNOWN"
+    assert result["transport_call_count"] == 0
+    assert not posts and kwargs["ledger"].inspect_campaign()
+    again = preparation_runtime.prepare_operator_execution(**kwargs, credentials=provider)
+    assert again["reason_code"] == "FIRST_ORDER_ALREADY_CONSUMED"
+    assert not posts
+
+
+def test_source_change_at_immediate_request_write_blocks_post(operator):
+    kwargs, provider, _, _, posts, _, _, source_state = operator
+    approved = source_state["value"]
+    source_state["sequence"] = [approved, replace(approved, clean=False)]
+    result = preparation_runtime.prepare_operator_execution(**kwargs, credentials=provider)
+    assert result["status"] == "UNKNOWN"
+    assert result["transport_call_count"] == 0
+    assert not posts and kwargs["ledger"].inspect_campaign()
+
+
+def test_check_only_behavior_does_not_depend_on_source_inspection(operator):
+    kwargs, _, _, _, posts, _, _, source_state = operator
+    source_state["value"] = OSError("check-only must not inspect the checkout")
+    check_only = {name: value for name, value in kwargs.items() if name != "source_root"}
+    result = preparation_runtime.prepare_check_only(**check_only)
+    assert result["status"] == "READY_TO_SUBMIT"
+    assert result["transport_call_count"] == 0
+    assert source_state["calls"] == 0 and not posts
+
+
 def test_unknown_consumes_entire_campaign_across_restart(operator):
-    kwargs, provider, _, artifacts, posts, fault, _ = operator
+    kwargs, provider, _, artifacts, posts, fault, _, _ = operator
     fault[0] = "unknown"
     result = preparation_runtime.prepare_operator_execution(**kwargs, credentials=provider)
     assert result["status"] == "UNKNOWN" and len(posts) == 1
@@ -201,7 +260,7 @@ def test_unknown_consumes_entire_campaign_across_restart(operator):
 
 
 def test_failed_commit_never_constructs_transport(operator, monkeypatch):
-    kwargs, provider, _, _, posts, _, _ = operator
+    kwargs, provider, _, _, posts, _, _, _ = operator
 
     def unavailable(*args, **kw):
         raise LedgerUnavailable("synthetic failure")
@@ -229,7 +288,7 @@ def test_failed_commit_never_constructs_transport(operator, monkeypatch):
     ],
 )
 def test_operator_missing_gate_never_posts(operator, monkeypatch, field):
-    kwargs, provider, _, _, posts, _, _ = operator
+    kwargs, provider, _, _, posts, _, _, _ = operator
     real = controlled.execute_controlled
 
     def altered(values, portfolio, **deps):
@@ -242,7 +301,7 @@ def test_operator_missing_gate_never_posts(operator, monkeypatch, field):
 
 @pytest.mark.parametrize("change", ["old_cap", "live", "quantity", "pin", "above_cap"])
 def test_scope_and_approved_identity_cannot_be_replaced(operator, monkeypatch, change):
-    kwargs, provider, _, _, posts, _, _ = operator
+    kwargs, provider, _, _, posts, _, _, _ = operator
     real = controlled.execute_controlled
 
     def altered(values, portfolio, **deps):
@@ -386,7 +445,7 @@ def test_old_five_receipt_cannot_approve_six(operator, monkeypatch):
     from atp.first_testnet_order.trust import trust_first_order
     from tests.first_order_support import SyntheticFirstOrderAuthority
 
-    kwargs, provider, _, _, posts, _, _ = operator
+    kwargs, provider, _, _, posts, _, _, _ = operator
     real = controlled.execute_controlled
 
     def altered(values, portfolio, **deps):
@@ -425,7 +484,7 @@ def test_reconciliation_quote_total_must_match(first_order):
 def test_read_only_recovery_is_signed_and_bound_to_campaign(operator, monkeypatch, mismatch):
     from atp.first_testnet_order import preparation_http
 
-    kwargs, provider, _, artifacts, posts, _, _ = operator
+    kwargs, provider, _, artifacts, posts, _, _, _ = operator
     report = preparation_runtime.prepare_operator_execution(**kwargs, credentials=provider)
     assert report["status"] == "ACKNOWLEDGED"
     auth = artifacts["first-order-authorization"]
@@ -469,7 +528,7 @@ def test_recovery_source_has_no_economic_route(operator):
     from atp.exchange.read_only import EvidenceError
     from atp.first_testnet_order.preparation_http import ReconciliationReadOnlySource
 
-    _, provider, _, _, posts, _, _ = operator
+    _, provider, _, _, posts, _, _, _ = operator
     source = ReconciliationReadOnlySource(provider)
     for route in ("withdraw", "cancel", "submit", "account", "openOrders", "../order"):
         with pytest.raises(EvidenceError):

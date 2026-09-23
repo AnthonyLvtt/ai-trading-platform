@@ -215,7 +215,10 @@ def run(args, window=None, feasibility_source=None):
         )
     elif getattr(args, "execute", False):
         report = prepare_operator_execution(
-            **arguments, now=lambda: datetime.now(UTC), credentials=provider
+            **arguments,
+            now=lambda: datetime.now(UTC),
+            credentials=provider,
+            source_root=root,
         )
     else:
         report = prepare_check_only(**arguments, now=lambda: datetime.now(UTC))
@@ -228,6 +231,8 @@ def run(args, window=None, feasibility_source=None):
     )
     if inspect_source(root) != releases[0][0].source:
         if getattr(args, "execute", False):
+            # Supplemental post-action evidence only. The trusted boundary already
+            # enforced exact source equality immediately before request write.
             report["source_changed_after_action"] = True
         else:
             raise EvidenceError("RELEASE_BINDING_REQUIRED")
