@@ -100,12 +100,15 @@ def watch_check_only(
     report_sink: Callable[[dict[str, object]], None],
     source_check: Callable[[], None],
     activation_grant: TestnetActivationGrant | None = None,
+    prepare_first_order: bool = False,
 ) -> dict[str, object]:
     """One initial evaluation of closed candles, then UTC 5m closes; never renew authority.
 
     Only NO_ACTION/EXIT repeats. Any gate failure or candidate first-order outcome stops.
     Pins are retained solely from the external channel, not generated from candidates.
     """
+    if type(prepare_first_order) is not bool:
+        raise EvidenceError("FIRST_ORDER_NOT_READY")
     grant = activation_grant
     pin: ContentIdentity | None = None
     tick = 0
@@ -160,6 +163,7 @@ def watch_check_only(
                 artifact_sink=save,
                 trust_pin_source=external_pin,
                 activation_grant=grant,
+                stop_before_first_order_trust=prepare_first_order,
             )
             window.read()
             source_check()

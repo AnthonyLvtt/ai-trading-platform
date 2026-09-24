@@ -88,8 +88,14 @@ def pre_watch_feasibility(source=None):
 
 
 def run(args, window=None, feasibility_source=None):
+    prepare_watcher = getattr(args, "watch_prepare_first_order", False)
     if (
-        not (args.check_only or getattr(args, "prepare", False) or getattr(args, "execute", False))
+        not (
+            args.check_only
+            or getattr(args, "prepare", False)
+            or getattr(args, "execute", False)
+            or prepare_watcher
+        )
         or not args.confirm_testnet_permissions
     ):
         return {
@@ -105,7 +111,7 @@ def run(args, window=None, feasibility_source=None):
         if feasibility["status"] != "FEASIBLE":
             return feasibility
         feasibility_identity = feasibility["feasibility_identity"]
-    campaign = operational_ledger() if getattr(args, "execute", False) else None
+    campaign = operational_ledger() if getattr(args, "execute", False) or prepare_watcher else None
     if campaign is not None and campaign.inspect_campaign():
         raise EvidenceError("FIRST_ORDER_ALREADY_CONSUMED")
     root = Path.cwd().resolve()
@@ -172,11 +178,16 @@ def run(args, window=None, feasibility_source=None):
             json.dump(document, stream, sort_keys=True)
         path.chmod(0o600)
         if name in ("activation-grant", "first-order-authorization"):
+            preparing_first = prepare_watcher and name == "first-order-authorization"
             print(
                 json.dumps(
                     {
-                        "status": "BLOCKED",
-                        "reason_code": "TRUST_PIN_REQUIRED",
+                        "status": ("READY_FOR_CTO_REVIEW" if preparing_first else "BLOCKED"),
+                        "reason_code": (
+                            "FIRST_ORDER_AUTHORIZATION_REVIEW_REQUIRED"
+                            if preparing_first
+                            else "TRUST_PIN_REQUIRED"
+                        ),
                         "candidate": name,
                         "content_identity": str(artifact.content_identity),
                         "real_economic_calls": 0,
@@ -212,6 +223,7 @@ def run(args, window=None, feasibility_source=None):
             window=window,
             report_sink=lambda item: print(json.dumps(item, sort_keys=True), flush=True),
             source_check=source_check,
+            prepare_first_order=prepare_watcher,
         )
     elif getattr(args, "execute", False):
         report = prepare_operator_execution(
@@ -254,6 +266,14 @@ def main() -> int:
         action="store_true",
         help="Public read-only check that an admissible BTCUSDT quantity exists right now",
     )
+    mode.add_argument(
+        "--watch-prepare-first-order",
+        action="store_true",
+        help=(
+            "Bounded watcher that stops after saving the first-order authorization candidate; "
+            "never requests its trust pin"
+        ),
+    )
     parser.add_argument(
         "--watch",
         action="store_true",
@@ -277,6 +297,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.watch and not args.check_only:
         parser.error("watch requires check-only; prepare/execute cannot be watched")
+    if args.watch_prepare_first_order and args.first_order_authorization_pin is not None:
+        parser.error("watch preparation never accepts a first-order authorization pin")
     if args.pre_watch_feasibility:
         try:
             report = pre_watch_feasibility()
@@ -291,12 +313,16 @@ def main() -> int:
         print(json.dumps(report, sort_keys=True))
         return 0 if report["status"] == "FEASIBLE" else 2
     if (
-        (args.check_only or args.prepare or args.execute)
+        (args.check_only or args.prepare or args.execute or args.watch_prepare_first_order)
         and args.confirm_testnet_permissions
         and not all((args.source_commit, args.release_version, args.session_dir))
     ):
         parser.error("source-commit, release-version and session-dir are required")
-    window = WatchWindow(lambda: datetime.now(UTC), Event()) if args.watch else None
+    window = (
+        WatchWindow(lambda: datetime.now(UTC), Event())
+        if args.watch or args.watch_prepare_first_order
+        else None
+    )
     handlers = {}
     if window is not None:
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -314,6 +340,7 @@ def main() -> int:
             "ACTIVATION_GRANT_NOT_YET_VALID",
             "ACTIVATION_GRANT_INVALID",
             "ACTIVATION_GRANT_UNTRUSTED",
+            "FIRST_ORDER_ALREADY_CONSUMED",
             "NO_ADMISSIBLE_QUANTITY",
             "OPEN_ORDERS_EVIDENCE_INVALID",
             "OPEN_ORDERS_EVIDENCE_STALE",
@@ -345,7 +372,7 @@ def main() -> int:
             signal.signal(sig, handler)
     report.setdefault("transport_call_count", 0)
     print(json.dumps(report, sort_keys=True))
-    return 0 if report["status"] == "READY_TO_SUBMIT" else 2
+    return 0 if report["status"] in ("READY_TO_SUBMIT", "READY_FOR_CTO_REVIEW") else 2
 
 
 if __name__ == "__main__":

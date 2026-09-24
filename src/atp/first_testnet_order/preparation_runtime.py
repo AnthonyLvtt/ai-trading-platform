@@ -176,6 +176,7 @@ def prepare_check_only(
     artifact_sink: Callable[[str, object], None] | None = None,
     trust_pin_source: Callable[[str], ContentIdentity | None] | None = None,
     activation_grant: TestnetActivationGrant | None = None,
+    stop_before_first_order_trust: bool = False,
 ) -> dict[str, object]:
     """Preparation only; no execution dependency can be supplied."""
     return _prepare(
@@ -192,6 +193,7 @@ def prepare_check_only(
         artifact_sink=artifact_sink,
         trust_pin_source=trust_pin_source,
         activation_grant=activation_grant,
+        stop_before_first_order_trust=stop_before_first_order_trust,
     )
 
 
@@ -250,8 +252,11 @@ def _prepare(
     artifact_sink: Callable[[str, object], None] | None = None,
     trust_pin_source: Callable[[str], ContentIdentity | None] | None = None,
     activation_grant: TestnetActivationGrant | None = None,
+    stop_before_first_order_trust: bool = False,
 ) -> dict[str, object]:
     """No execute option. Every proof belongs to this evaluation, never a cached Risk result."""
+    if type(stop_before_first_order_trust) is not bool:
+        raise EvidenceError("FIRST_ORDER_NOT_READY")
     # Establish capabilities before any network read, independently of account responses.
     credential_authority.attest(credential_source_identity)
     clock = ReadOnlyClock(source, now)
@@ -490,6 +495,41 @@ def _prepare(
     capacity_error = check_order_capacity(filters, open_orders, "BTCUSDT", candidate_at)
     if capacity_error is not None:
         report["reason_code"] = capacity_error
+        return report
+    if stop_before_first_order_trust:
+        if ledger.inspect_campaign():
+            report["reason_code"] = "FIRST_ORDER_ALREADY_CONSUMED"
+            return report
+        if artifact_sink is not None:
+            for name, artifact in (
+                ("first-order-authorization", authorization),
+                ("runtime-authorization-context", context),
+                ("quantity-selection", selection),
+                ("open-orders-evidence", open_orders),
+                ("portfolio-evidence", portfolio),
+                ("upstream-proof", proof),
+                ("strategy-evaluation", strategy),
+            ):
+                artifact_sink(name, artifact)
+        report.update(
+            status="READY_FOR_CTO_REVIEW",
+            reason_code="FIRST_ORDER_AUTHORIZATION_REVIEW_REQUIRED",
+            transport_call_count=0,
+            quantity_selection=encoded(selection),
+            filter_applicability=encoded(applicability),
+            open_orders_evidence_identity=str(open_orders.content_identity),
+            quantity_selection_identity=str(selection.content_identity),
+            upstream_proof_identity=str(proof.content_identity),
+            risk_identity=str(risk.decision.content_identity),
+            activation_grant_identity=str(grant.content_identity),
+            activation_grant_valid_until=grant.validity_end.isoformat(),
+            first_order_identity=str(authorization.content_identity),
+            first_order_valid_until=authorization.valid_until.isoformat(),
+            client_order_id=authorization.client_order_id,
+            ledger_state="NOT_ATTEMPTED",
+            ops=ops.readiness_status.value,
+            promotion=promotion.status.value,
+        )
         return report
     first_pin = external_pin(
         "first-order-authorization", authorization, authorization.content_identity
