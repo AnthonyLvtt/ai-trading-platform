@@ -174,6 +174,14 @@ def watch_check_only(
             window.bind(grant, max_grant_duration)
         while True:
             window.read()
+            if prepare_first_order and ledger.inspect_campaign():
+                return {
+                    "status": "BLOCKED",
+                    "reason_code": "FIRST_ORDER_ALREADY_CONSUMED",
+                    "real_economic_calls": 0,
+                    "transport_call_count": 0,
+                    "LIVE": "LIVE_FORBIDDEN",
+                }
             source_check()
             window.read()
             tick += 1

@@ -8,6 +8,7 @@ import pytest
 
 from atp.exchange.read_only import EvidenceError
 from atp.first_testnet_order.ledger import TestnetSubmissionLedger
+from atp.first_testnet_order.model import SubmissionState
 from atp.first_testnet_order.preparation_runtime import CheckOnlyTransport
 from atp.first_testnet_order.watcher import WatchWindow, watch_check_only
 from atp.shared.identity import ContentIdentity
@@ -82,6 +83,7 @@ def harness(
     second_mode="exact",
     prepare_first_order=False,
     after_pin=None,
+    after_report=None,
     stop_after=None,
     grant_duration=timedelta(minutes=30),
 ):
@@ -112,6 +114,8 @@ def harness(
 
     def report(result):
         reports.append(result)
+        if after_report is not None:
+            after_report(result, ledger, source)
         if stop_after is not None and len(reports) >= stop_after:
             stop.set()
 
@@ -352,6 +356,55 @@ def test_preparation_watcher_stops_at_candidate_without_second_pin(
         "strategy-evaluation",
     } <= {name.split("-", 2)[-1] for name in artifacts}
     assert TestnetSubmissionLedger(tmp_path / "watch.sqlite").inspect_campaign() is False
+
+
+def test_preparation_watcher_detects_external_campaign_consumption_before_next_tick(
+    activation, tmp_path, monkeypatch
+):
+    from atp.first_testnet_order import controlled, preparation_runtime
+
+    monkeypatch.setattr(
+        preparation_runtime,
+        "trust_first_order",
+        lambda *args, **kwargs: pytest.fail("First-order trust receipt must not be created"),
+    )
+    monkeypatch.setattr(
+        controlled,
+        "execute_controlled",
+        lambda *args, **kwargs: pytest.fail("Economic execution must not be invoked"),
+    )
+    externally_consumed_bytes = []
+    calls_at_consumption = []
+
+    def consume_after_first_tick(result, ledger, source):
+        assert result["strategy_signal"] == "NO_ACTION"
+        ledger.append(
+            ContentIdentity.from_text("external-authorization"),
+            "external-client-order-id",
+            SubmissionState.ATTEMPT_STARTED,
+        )
+        externally_consumed_bytes.append(ledger.path.read_bytes())
+        calls_at_consumption.append(tuple(source.calls))
+
+    result, source, artifacts, prompts, reports, _ = harness(
+        activation,
+        tmp_path,
+        signals=("NO_ACTION", "LONG_ENTRY"),
+        prepare_first_order=True,
+        after_report=consume_after_first_tick,
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert result["reason_code"] == "FIRST_ORDER_ALREADY_CONSUMED"
+    assert result["transport_call_count"] == result["real_economic_calls"] == 0
+    assert result["LIVE"] == "LIVE_FORBIDDEN"
+    assert len(reports) == 1
+    assert len(source.evaluations) == 1
+    assert tuple(source.calls) == calls_at_consumption[0]
+    assert prompts == ["activation-grant"]
+    assert "first-order-authorization" not in artifacts
+    assert (tmp_path / "watch.sqlite").read_bytes() == externally_consumed_bytes[0]
+    assert TestnetSubmissionLedger(tmp_path / "watch.sqlite").inspect_campaign() is True
 
 
 @pytest.mark.parametrize("kind", ["activation-grant", "first-order-authorization"])
