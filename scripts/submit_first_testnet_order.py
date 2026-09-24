@@ -18,6 +18,8 @@ from atp.first_testnet_order.feasibility import check_pre_watch_feasibility
 from atp.first_testnet_order.ledger import TestnetSubmissionLedger
 from atp.first_testnet_order.preparation_http import PublicTestnetSource, TestnetReadOnlySource
 from atp.first_testnet_order.preparation_runtime import (
+    DEFAULT_ACTIVATION_GRANT_DURATION,
+    MAX_PREPARATION_ACTIVATION_GRANT_DURATION,
     prepare_check_only,
     prepare_operator_execution,
 )
@@ -111,6 +113,12 @@ def run(args, window=None, feasibility_source=None):
         if feasibility["status"] != "FEASIBLE":
             return feasibility
         feasibility_identity = feasibility["feasibility_identity"]
+    requested_duration = getattr(args, "activation_grant_duration_minutes", None)
+    activation_grant_duration = (
+        DEFAULT_ACTIVATION_GRANT_DURATION
+        if requested_duration is None
+        else timedelta(minutes=requested_duration)
+    )
     campaign = operational_ledger() if getattr(args, "execute", False) or prepare_watcher else None
     if campaign is not None and campaign.inspect_campaign():
         raise EvidenceError("FIRST_ORDER_ALREADY_CONSUMED")
@@ -224,6 +232,7 @@ def run(args, window=None, feasibility_source=None):
             report_sink=lambda item: print(json.dumps(item, sort_keys=True), flush=True),
             source_check=source_check,
             prepare_first_order=prepare_watcher,
+            activation_grant_duration=activation_grant_duration,
         )
     elif getattr(args, "execute", False):
         report = prepare_operator_execution(
@@ -283,6 +292,11 @@ def main() -> int:
     parser.add_argument("--release-version")
     parser.add_argument("--session-dir", type=Path)
     parser.add_argument("--activation-grant-pin")
+    parser.add_argument(
+        "--activation-grant-duration-minutes",
+        type=int,
+        help=("Explicit preparation-watcher grant duration; defaults to 30 and is capped at 720"),
+    )
     parser.add_argument("--first-order-authorization-pin")
     parser.add_argument(
         "--request-trust-pins",
@@ -299,6 +313,13 @@ def main() -> int:
         parser.error("watch requires check-only; prepare/execute cannot be watched")
     if args.watch_prepare_first_order and args.first_order_authorization_pin is not None:
         parser.error("watch preparation never accepts a first-order authorization pin")
+    duration = args.activation_grant_duration_minutes
+    if duration is not None:
+        if not args.watch_prepare_first_order:
+            parser.error("activation-grant-duration-minutes requires watch-prepare-first-order")
+        maximum = int(MAX_PREPARATION_ACTIVATION_GRANT_DURATION.total_seconds() // 60)
+        if duration <= 0 or duration > maximum:
+            parser.error("activation-grant-duration-minutes must be between 1 and 720")
     if args.pre_watch_feasibility:
         try:
             report = pre_watch_feasibility()

@@ -7,7 +7,12 @@ from threading import Event
 
 from atp.exchange.read_only import EvidenceError
 from atp.first_testnet_order.ledger import TestnetSubmissionLedger
-from atp.first_testnet_order.preparation_runtime import ReadOnlySource, prepare_check_only
+from atp.first_testnet_order.preparation_runtime import (
+    DEFAULT_ACTIVATION_GRANT_DURATION,
+    MAX_PREPARATION_ACTIVATION_GRANT_DURATION,
+    ReadOnlySource,
+    prepare_check_only,
+)
 from atp.release_deployment.model import ReleaseBundle
 from atp.shared.identity import ContentIdentity
 from atp.testnet_activation.composition import CredentialCapabilityAuthority
@@ -48,14 +53,23 @@ class WatchWindow:
             raise EvidenceError("WATCHER_STOPPED")
         return at
 
-    def bind(self, grant: TestnetActivationGrant) -> None:
+    def bind(
+        self,
+        grant: TestnetActivationGrant,
+        max_duration: timedelta = DEFAULT_ACTIVATION_GRANT_DURATION,
+    ) -> None:
         if type(grant) is TestnetActivationGrant and grant.allowed_environment == "LIVE":
             raise EvidenceError("LIVE_FORBIDDEN")
         if not valid(grant, TestnetActivationGrant):
             raise EvidenceError("ACTIVATION_GRANT_INVALID")
         if self.grant is not None and self.grant != grant:
             raise EvidenceError("ACTIVATION_GRANT_INVALID")
-        if grant.validity_end - grant.validity_start > timedelta(minutes=30):
+        if (
+            type(max_duration) is not timedelta
+            or max_duration <= timedelta(0)
+            or max_duration > MAX_PREPARATION_ACTIVATION_GRANT_DURATION
+            or grant.validity_end - grant.validity_start > max_duration
+        ):
             raise EvidenceError("ACTIVATION_GRANT_INVALID")
         self.grant = grant
         self.read()
@@ -101,6 +115,7 @@ def watch_check_only(
     source_check: Callable[[], None],
     activation_grant: TestnetActivationGrant | None = None,
     prepare_first_order: bool = False,
+    activation_grant_duration: timedelta = DEFAULT_ACTIVATION_GRANT_DURATION,
 ) -> dict[str, object]:
     """One initial evaluation of closed candles, then UTC 5m closes; never renew authority.
 
@@ -109,6 +124,19 @@ def watch_check_only(
     """
     if type(prepare_first_order) is not bool:
         raise EvidenceError("FIRST_ORDER_NOT_READY")
+    if (
+        type(activation_grant_duration) is not timedelta
+        or activation_grant_duration <= timedelta(0)
+        or activation_grant_duration > MAX_PREPARATION_ACTIVATION_GRANT_DURATION
+        or (
+            not prepare_first_order
+            and activation_grant_duration != DEFAULT_ACTIVATION_GRANT_DURATION
+        )
+    ):
+        raise EvidenceError("ACTIVATION_GRANT_INVALID")
+    max_grant_duration = (
+        activation_grant_duration if prepare_first_order else DEFAULT_ACTIVATION_GRANT_DURATION
+    )
     grant = activation_grant
     pin: ContentIdentity | None = None
     tick = 0
@@ -119,7 +147,7 @@ def watch_check_only(
         if kind == "activation-grant":
             if type(artifact) is not TestnetActivationGrant:
                 raise EvidenceError("ACTIVATION_GRANT_INVALID")
-            window.bind(artifact)
+            window.bind(artifact, max_grant_duration)
             grant = artifact
             if tick != 1:
                 return
@@ -143,7 +171,7 @@ def watch_check_only(
 
     try:
         if grant is not None:
-            window.bind(grant)
+            window.bind(grant, max_grant_duration)
         while True:
             window.read()
             source_check()
@@ -164,6 +192,7 @@ def watch_check_only(
                 trust_pin_source=external_pin,
                 activation_grant=grant,
                 stop_before_first_order_trust=prepare_first_order,
+                activation_grant_duration=activation_grant_duration,
             )
             window.read()
             source_check()

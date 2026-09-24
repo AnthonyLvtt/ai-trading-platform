@@ -46,6 +46,7 @@ def test_prepare_watcher_is_explicit_and_does_not_reuse_watch_modifier(
         assert args.watch_prepare_first_order is True
         assert args.check_only is args.prepare is args.execute is False
         assert args.watch is False
+        assert args.activation_grant_duration_minutes is None
         assert window is not None
         return {
             "status": "READY_FOR_CTO_REVIEW",
@@ -76,6 +77,50 @@ def test_prepare_watcher_is_explicit_and_does_not_reuse_watch_modifier(
     assert result["transport_call_count"] == result["real_economic_calls"] == 0
 
 
+@pytest.mark.parametrize("duration", ["0", "-1", "721"])
+def test_prepare_watcher_rejects_duration_outside_explicit_bounds(duration):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/submit_first_testnet_order.py",
+            "--watch-prepare-first-order",
+            "--activation-grant-duration-minutes",
+            duration,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "must be between 1 and 720" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "--check-only",
+        "--prepare",
+        "--execute",
+        "--pre-watch-feasibility",
+    ],
+)
+def test_duration_flag_is_rejected_for_every_other_mode(mode):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/submit_first_testnet_order.py",
+            mode,
+            "--activation-grant-duration-minutes",
+            "30",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "requires watch-prepare-first-order" in result.stderr
+
+
 def test_prepare_watcher_rejects_first_order_pin_at_cli_boundary():
     result = subprocess.run(
         [
@@ -91,6 +136,46 @@ def test_prepare_watcher_rejects_first_order_pin_at_cli_boundary():
     )
     assert result.returncode == 2
     assert "never accepts a first-order authorization pin" in result.stderr
+
+
+def test_prepare_watcher_accepts_explicit_twelve_hour_maximum(monkeypatch, capsys, tmp_path):
+    import json
+
+    module = cli_module()
+
+    def prepared(args, window):
+        assert args.activation_grant_duration_minutes == 720
+        assert window is not None
+        return {
+            "status": "READY_FOR_CTO_REVIEW",
+            "reason_code": "FIRST_ORDER_AUTHORIZATION_REVIEW_REQUIRED",
+            "real_economic_calls": 0,
+            "LIVE": "LIVE_FORBIDDEN",
+        }
+
+    monkeypatch.setattr(module, "run", prepared)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "check",
+            "--watch-prepare-first-order",
+            "--activation-grant-duration-minutes",
+            "720",
+            "--confirm-testnet-permissions",
+            "--source-commit",
+            "a" * 40,
+            "--release-version",
+            "test",
+            "--session-dir",
+            str(tmp_path / "private"),
+        ],
+    )
+
+    assert module.main() == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "READY_FOR_CTO_REVIEW"
+    assert result["transport_call_count"] == result["real_economic_calls"] == 0
 
 
 def test_prepare_watcher_inspects_canonical_ledger_without_mutation(
@@ -125,6 +210,7 @@ def test_prepare_watcher_inspects_canonical_ledger_without_mutation(
     def watch(**kwargs):
         assert kwargs["ledger"] is canonical
         assert kwargs["prepare_first_order"] is True
+        assert kwargs["activation_grant_duration"] == timedelta(minutes=30)
         assert canonical.inspect_campaign() is False
         return {
             "status": "READY_FOR_CTO_REVIEW",
@@ -165,6 +251,7 @@ def test_prepare_watcher_inspects_canonical_ledger_without_mutation(
         activation_grant_pin=None,
         first_order_authorization_pin=None,
         request_trust_pins=False,
+        activation_grant_duration_minutes=None,
     )
     result = module.run(args, WatchWindow(lambda: NOW, Event(), lambda seconds: False))
 
