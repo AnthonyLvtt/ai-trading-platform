@@ -66,11 +66,17 @@ class SyntheticCredentialCapabilityAuthority(CredentialCapabilityAuthority):
 
     def attest(self, source):
         return TrustedCredentialCapabilityEvidence(
-            self.present,
-            self.trading,
-            self.withdrawal_absent,
-            source,
-            "synthetic-capability-authority",
+            credentials_present=self.present,
+            trading_capability_confirmed=self.trading,
+            withdrawal_capability_absent=self.withdrawal_absent,
+            credential_source_identity=source,
+            credential_reference_id="synthetic-session-reference",
+            permission_attestation_identity=ContentIdentity.from_text(
+                "synthetic-permission-attestation"
+            ),
+            permission_verified_at=NOW - timedelta(hours=1),
+            permission_valid_until=NOW + timedelta(hours=24),
+            authority_reference="synthetic-capability-authority",
         )
 
 

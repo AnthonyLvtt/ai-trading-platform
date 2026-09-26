@@ -87,6 +87,9 @@ from atp.testnet_qualification.model import (
     TestnetQualificationSuiteResult,
 )
 
+DEFAULT_ACTIVATION_GRANT_DURATION = timedelta(minutes=30)
+MAX_PREPARATION_ACTIVATION_GRANT_DURATION = timedelta(minutes=720)
+
 
 class ReadOnlySource(Protocol):
     def read(self, resource: str, parameters: tuple[tuple[str, str], ...] = ()) -> object: ...
@@ -177,6 +180,7 @@ def prepare_check_only(
     trust_pin_source: Callable[[str], ContentIdentity | None] | None = None,
     activation_grant: TestnetActivationGrant | None = None,
     stop_before_first_order_trust: bool = False,
+    activation_grant_duration: timedelta = DEFAULT_ACTIVATION_GRANT_DURATION,
 ) -> dict[str, object]:
     """Preparation only; no execution dependency can be supplied."""
     return _prepare(
@@ -194,6 +198,7 @@ def prepare_check_only(
         trust_pin_source=trust_pin_source,
         activation_grant=activation_grant,
         stop_before_first_order_trust=stop_before_first_order_trust,
+        activation_grant_duration=activation_grant_duration,
     )
 
 
@@ -253,14 +258,36 @@ def _prepare(
     trust_pin_source: Callable[[str], ContentIdentity | None] | None = None,
     activation_grant: TestnetActivationGrant | None = None,
     stop_before_first_order_trust: bool = False,
+    activation_grant_duration: timedelta = DEFAULT_ACTIVATION_GRANT_DURATION,
 ) -> dict[str, object]:
     """No execute option. Every proof belongs to this evaluation, never a cached Risk result."""
     if type(stop_before_first_order_trust) is not bool:
         raise EvidenceError("FIRST_ORDER_NOT_READY")
+    if (
+        type(activation_grant_duration) is not timedelta
+        or activation_grant_duration <= timedelta(0)
+        or activation_grant_duration > MAX_PREPARATION_ACTIVATION_GRANT_DURATION
+        or (
+            not stop_before_first_order_trust
+            and activation_grant_duration != DEFAULT_ACTIVATION_GRANT_DURATION
+        )
+    ):
+        raise EvidenceError("ACTIVATION_GRANT_INVALID")
     # Establish capabilities before any network read, independently of account responses.
-    credential_authority.attest(credential_source_identity)
+    capability = credential_authority.attest(credential_source_identity)
     clock = ReadOnlyClock(source, now)
     at = clock.read().gate_evaluation_time
+    permission_valid_until = capability.permission_valid_until
+    if stop_before_first_order_trust and permission_valid_until is None:
+        raise EvidenceError("CREDENTIAL_CAPABILITY_INVALID")
+    requested_validity_end = at + activation_grant_duration
+    effective_validity_end = (
+        requested_validity_end
+        if permission_valid_until is None
+        else min(requested_validity_end, permission_valid_until)
+    )
+    if effective_validity_end <= at:
+        raise EvidenceError("CREDENTIAL_CAPABILITY_INVALID")
     grant = (
         activation_grant
         if activation_grant is not None
@@ -273,7 +300,7 @@ def _prepare(
             ("BTCUSDT",),
             ("MARKET",),
             at,
-            at + timedelta(minutes=30),
+            effective_validity_end,
             "CTO",
         )
     )

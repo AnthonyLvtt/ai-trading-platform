@@ -8,6 +8,7 @@ import pytest
 
 from atp.exchange.read_only import EvidenceError
 from atp.first_testnet_order.ledger import TestnetSubmissionLedger
+from atp.first_testnet_order.model import SubmissionState
 from atp.first_testnet_order.preparation_runtime import CheckOnlyTransport
 from atp.first_testnet_order.watcher import WatchWindow, watch_check_only
 from atp.shared.identity import ContentIdentity
@@ -82,7 +83,9 @@ def harness(
     second_mode="exact",
     prepare_first_order=False,
     after_pin=None,
+    after_report=None,
     stop_after=None,
+    grant_duration=timedelta(minutes=30),
 ):
     clock = Clock(at)
     stop = Event()
@@ -111,6 +114,8 @@ def harness(
 
     def report(result):
         reports.append(result)
+        if after_report is not None:
+            after_report(result, ledger, source)
         if stop_after is not None and len(reports) >= stop_after:
             stop.set()
 
@@ -131,6 +136,7 @@ def harness(
         source_check=lambda: None,
         activation_grant=grant,
         prepare_first_order=prepare_first_order,
+        activation_grant_duration=grant_duration,
     )
     assert result["real_economic_calls"] == 0
     assert result["transport_call_count"] == 0
@@ -177,8 +183,87 @@ def test_preparation_watcher_grant_expiry_stops_without_second_pin(activation, t
     )
     assert result["reason_code"] == "ACTIVATION_GRANT_EXPIRED"
     assert clock.at == artifacts["activation-grant"].validity_end
+    assert artifacts["activation-grant"].validity_end - artifacts[
+        "activation-grant"
+    ].validity_start == timedelta(minutes=30)
     assert prompts == ["activation-grant"]
     assert "first-order-authorization" not in artifacts
+
+
+def test_long_preparation_watch_retains_one_grant_context_and_reference(
+    activation, monkeypatch, tmp_path
+):
+    import atp.first_testnet_order.preparation_runtime as preparation_runtime
+
+    duration = timedelta(minutes=720)
+    context_identities = []
+    original_validate = preparation_runtime.validate_activation
+
+    def record_context(*args, **kwargs):
+        result = original_validate(*args, **kwargs)
+        if result.context is not None:
+            context_identities.append(result.context.content_identity)
+        return result
+
+    monkeypatch.setattr(preparation_runtime, "validate_activation", record_context)
+    result, source, artifacts, prompts, reports, clock = harness(
+        activation,
+        tmp_path,
+        prepare_first_order=True,
+        grant_duration=duration,
+    )
+
+    grant = artifacts["activation-grant"]
+    assert result["reason_code"] == "ACTIVATION_GRANT_EXPIRED"
+    assert grant.validity_end - grant.validity_start == duration
+    assert clock.at == grant.validity_end
+    assert prompts == ["activation-grant"]
+    assert len(reports) == len(source.evaluations) == 144
+    assert len(context_identities) == 144
+    assert len(set(context_identities)) == 1
+    assert "first-order-authorization" not in artifacts
+
+
+def test_preparation_grant_end_is_capped_by_credential_permission(activation, tmp_path):
+    permission_end = NOW + timedelta(minutes=75)
+
+    class ShortCapability(type(activation["credential_authority"])):
+        def attest(self, source):
+            return replace(super().attest(source), permission_valid_until=permission_end)
+
+    scoped = activation | {"credential_authority": ShortCapability()}
+    result, _, artifacts, prompts, _, clock = harness(
+        scoped,
+        tmp_path,
+        prepare_first_order=True,
+        grant_duration=timedelta(minutes=720),
+    )
+
+    assert result["reason_code"] == "ACTIVATION_GRANT_EXPIRED"
+    assert artifacts["activation-grant"].validity_end == permission_end
+    assert clock.at == permission_end
+    assert prompts == ["activation-grant"]
+
+
+def test_effective_grant_validity_changes_candidate_identity(activation, tmp_path):
+    _, _, short, _, _, _ = harness(
+        activation,
+        tmp_path / "short",
+        pin_mode="missing",
+        prepare_first_order=True,
+        grant_duration=timedelta(minutes=30),
+    )
+    _, _, long, _, _, _ = harness(
+        activation,
+        tmp_path / "long",
+        pin_mode="missing",
+        prepare_first_order=True,
+        grant_duration=timedelta(minutes=720),
+    )
+
+    assert short["activation-grant"].validity_end == NOW + timedelta(minutes=30)
+    assert long["activation-grant"].validity_end == NOW + timedelta(minutes=720)
+    assert short["activation-grant"].content_identity != long["activation-grant"].content_identity
 
 
 def test_late_start_uses_remaining_lifetime(activation, tmp_path):
@@ -271,6 +356,55 @@ def test_preparation_watcher_stops_at_candidate_without_second_pin(
         "strategy-evaluation",
     } <= {name.split("-", 2)[-1] for name in artifacts}
     assert TestnetSubmissionLedger(tmp_path / "watch.sqlite").inspect_campaign() is False
+
+
+def test_preparation_watcher_detects_external_campaign_consumption_before_next_tick(
+    activation, tmp_path, monkeypatch
+):
+    from atp.first_testnet_order import controlled, preparation_runtime
+
+    monkeypatch.setattr(
+        preparation_runtime,
+        "trust_first_order",
+        lambda *args, **kwargs: pytest.fail("First-order trust receipt must not be created"),
+    )
+    monkeypatch.setattr(
+        controlled,
+        "execute_controlled",
+        lambda *args, **kwargs: pytest.fail("Economic execution must not be invoked"),
+    )
+    externally_consumed_bytes = []
+    calls_at_consumption = []
+
+    def consume_after_first_tick(result, ledger, source):
+        assert result["strategy_signal"] == "NO_ACTION"
+        ledger.append(
+            ContentIdentity.from_text("external-authorization"),
+            "external-client-order-id",
+            SubmissionState.ATTEMPT_STARTED,
+        )
+        externally_consumed_bytes.append(ledger.path.read_bytes())
+        calls_at_consumption.append(tuple(source.calls))
+
+    result, source, artifacts, prompts, reports, _ = harness(
+        activation,
+        tmp_path,
+        signals=("NO_ACTION", "LONG_ENTRY"),
+        prepare_first_order=True,
+        after_report=consume_after_first_tick,
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert result["reason_code"] == "FIRST_ORDER_ALREADY_CONSUMED"
+    assert result["transport_call_count"] == result["real_economic_calls"] == 0
+    assert result["LIVE"] == "LIVE_FORBIDDEN"
+    assert len(reports) == 1
+    assert len(source.evaluations) == 1
+    assert tuple(source.calls) == calls_at_consumption[0]
+    assert prompts == ["activation-grant"]
+    assert "first-order-authorization" not in artifacts
+    assert (tmp_path / "watch.sqlite").read_bytes() == externally_consumed_bytes[0]
+    assert TestnetSubmissionLedger(tmp_path / "watch.sqlite").inspect_campaign() is True
 
 
 @pytest.mark.parametrize("kind", ["activation-grant", "first-order-authorization"])
