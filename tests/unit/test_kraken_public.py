@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from atp.exchange.contracts import BTC_EUR, BTC_USDT, VenueId
+from atp.exchange.kraken import (
+    KRAKEN_PUBLIC_ROUTE_ALLOWLIST,
+    KrakenPublicClient,
+    KrakenPublicHTTPTransport,
+    parse_asset_pairs,
+    parse_closed_ohlc,
+    parse_server_time,
+    parse_system_status,
+    parse_ticker_price,
+)
+from atp.exchange.read_only import EvidenceError
+
+FIXTURES = Path("tests/fixtures/kraken")
+AT = datetime(2026, 9, 24, 12, 0, 1, tzinfo=UTC)
+
+
+def fixture(name: str) -> object:
+    return json.loads((FIXTURES / name).read_text())
+
+
+class FixtureTransport:
+    routes = {
+        "/0/public/Time": "time.json",
+        "/0/public/SystemStatus": "system-status.json",
+        "/0/public/AssetPairs": "asset-pairs.json",
+        "/0/public/OHLC": "ohlc.json",
+        "/0/public/Ticker": "ticker.json",
+    }
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[tuple[str, str], ...]]] = []
+
+    def get(self, path: str, parameters: tuple[tuple[str, str], ...] = ()) -> object:
+        self.calls.append((path, parameters))
+        return fixture(self.routes[path])
+
+
+def evidence():
+    mapping, metadata = parse_asset_pairs(fixture("asset-pairs.json"), BTC_EUR, AT)
+    return mapping, metadata
+
+
+def test_offline_parsers_resolve_btc_eur_and_closed_candles() -> None:
+    mapping, metadata = evidence()
+    assert mapping.venue is VenueId.KRAKEN_SPOT
+    assert mapping.instrument == BTC_EUR
+    assert mapping.native_identifier == "XXBTZEUR"
+    assert mapping.native_aliases == ("XXBTZEUR", "XBTEUR", "XBT/EUR")
+    assert metadata.mapping_identity == mapping.content_identity
+    assert str(metadata.price_increment) == "0.1"
+    assert str(metadata.quantity_increment) == "1E-8"
+    assert parse_server_time(fixture("time.json"), AT).venue is VenueId.KRAKEN_SPOT
+    assert parse_system_status(fixture("system-status.json"), AT).status == "online"
+    candles = parse_closed_ohlc(fixture("ohlc.json"), BTC_EUR, mapping, 5, AT)
+    assert len(candles.candles) == 2
+    assert candles.candles[-1].close.is_finite()
+    price = parse_ticker_price(fixture("ticker.json"), BTC_EUR, mapping, AT)
+    assert str(price.price) == "95250.0"
+    assert price.source == "KRAKEN_TICKER_LAST_TRADE"
+
+
+def test_alias_multiplicity_is_one_mapping_but_economic_ambiguity_blocks() -> None:
+    payload = fixture("asset-pairs.json")
+    mapping, _ = parse_asset_pairs(payload, BTC_EUR, AT)
+    assert len(mapping.native_aliases) == 3
+    assert isinstance(payload, dict) and isinstance(payload["result"], dict)
+    payload["result"]["XBTZEUR.SECOND"] = dict(payload["result"]["XXBTZEUR"])
+    with pytest.raises(EvidenceError, match="KRAKEN_MAPPING_AMBIGUOUS"):
+        parse_asset_pairs(payload, BTC_EUR, AT)
+
+
+def test_unknown_fields_errors_and_foreign_mappings_fail_closed() -> None:
+    payload = fixture("asset-pairs.json")
+    assert isinstance(payload, dict) and isinstance(payload["result"], dict)
+    payload["result"]["XXBTZEUR"]["unknown_constraint"] = "1"
+    with pytest.raises(EvidenceError, match="KRAKEN_METADATA_UNKNOWN_FIELD"):
+        parse_asset_pairs(payload, BTC_EUR, AT)
+    errored = fixture("time.json")
+    assert isinstance(errored, dict)
+    errored["error"] = ["EService:Unavailable"]
+    with pytest.raises(EvidenceError, match="KRAKEN_ENVELOPE_INVALID"):
+        parse_server_time(errored, AT)
+    mapping, _ = evidence()
+    with pytest.raises(EvidenceError, match="FOREIGN_MAPPING"):
+        parse_ticker_price(fixture("ticker.json"), BTC_USDT, mapping, AT)
+
+
+def test_public_client_uses_only_closed_allowlist_and_exact_mapping() -> None:
+    transport = FixtureTransport()
+    client = KrakenPublicClient(transport)
+    client.server_time(AT)
+    client.system_status(AT)
+    mapping, _ = client.instrument_metadata(BTC_EUR, AT)
+    client.closed_candles(BTC_EUR, mapping, 5, AT)
+    client.price(BTC_EUR, mapping, AT)
+    assert {path for path, _ in transport.calls} == KRAKEN_PUBLIC_ROUTE_ALLOWLIST
+    assert all(path.startswith("/0/public/") for path in KRAKEN_PUBLIC_ROUTE_ALLOWLIST)
+    assert not any(
+        token in path.casefold()
+        for path in KRAKEN_PUBLIC_ROUTE_ALLOWLIST
+        for token in ("private", "order", "balance", "withdraw", "cancel")
+    )
+
+
+def test_http_transport_rejects_every_non_allowlisted_route_without_network() -> None:
+    transport = KrakenPublicHTTPTransport()
+    for path in (
+        "/0/private/Balance",
+        "/0/private/OpenOrders",
+        "/0/private/AddOrder",
+        "/0/private/Withdraw",
+        "/0/public/Unknown",
+    ):
+        with pytest.raises(EvidenceError, match="KRAKEN_PUBLIC_ROUTE_FORBIDDEN"):
+            transport.get(path)
