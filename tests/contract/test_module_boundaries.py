@@ -25,6 +25,7 @@ DATA_MODULES = [
     "atp.data.consumption",
     "atp.data.identity",
     "atp.data.lineage",
+    "atp.data.market_data",
     "atp.data.snapshot",
     "atp.data.temporal",
     "atp.data.universe",
@@ -87,6 +88,9 @@ MODULES = [
     "atp.exchange.kraken",
     "atp.exchange.kraken.public",
     "atp.kraken_qualification",
+    "atp.kraken_market_data_qualification",
+    "atp.kraken_market_data_qualification.engine",
+    "atp.kraken_market_data_qualification.model",
     "atp.release_deployment",
     "atp.persistence",
 ]
