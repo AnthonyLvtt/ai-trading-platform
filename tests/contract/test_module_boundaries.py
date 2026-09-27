@@ -91,6 +91,11 @@ MODULES = [
     "atp.kraken_market_data_qualification",
     "atp.kraken_market_data_qualification.engine",
     "atp.kraken_market_data_qualification.model",
+    "atp.kraken_strategy",
+    "atp.kraken_strategy.composition",
+    "atp.kraken_strategy_qualification",
+    "atp.kraken_strategy_qualification.engine",
+    "atp.kraken_strategy_qualification.model",
     "atp.release_deployment",
     "atp.persistence",
 ]
