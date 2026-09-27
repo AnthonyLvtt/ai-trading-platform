@@ -1,6 +1,18 @@
-"""Binance Spot Testnet boundary; current Risk/OPS policies prevent runtime activation."""
+"""Exchange boundaries. Binance execution identities remain backward compatible."""
 
 from atp.exchange.adapter import ExchangeAdapter, authorize_testnet
+from atp.exchange.binance_compat import BinanceCompatibility
+from atp.exchange.contracts import (
+    BTC_EUR,
+    BTC_USDT,
+    CanonicalInstrumentId,
+    MarketKind,
+    PublicExchangePort,
+    SelectedPublicExchange,
+    VenueId,
+    VenueInstrumentMappingEvidence,
+    VenueSelectionError,
+)
 from atp.exchange.model import (
     ExchangeConnectivityResult,
     ExchangeOrderRequest,
@@ -24,6 +36,16 @@ from atp.exchange.transport import (
 __all__ = [
     "ExchangeConnectivityResult",
     "ExchangeAdapter",
+    "BinanceCompatibility",
+    "BTC_EUR",
+    "BTC_USDT",
+    "CanonicalInstrumentId",
+    "MarketKind",
+    "PublicExchangePort",
+    "SelectedPublicExchange",
+    "VenueId",
+    "VenueInstrumentMappingEvidence",
+    "VenueSelectionError",
     "authorize_testnet",
     "ExchangeOrderRequest",
     "ExchangePolicy",

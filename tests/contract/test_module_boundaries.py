@@ -82,6 +82,11 @@ MODULES = [
     "atp.ops",
     "atp.web",
     "atp.exchange",
+    "atp.exchange.contracts",
+    "atp.exchange.binance_compat",
+    "atp.exchange.kraken",
+    "atp.exchange.kraken.public",
+    "atp.kraken_qualification",
     "atp.release_deployment",
     "atp.persistence",
 ]
