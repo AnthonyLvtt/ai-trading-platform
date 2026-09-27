@@ -19,6 +19,7 @@ class KrakenQualificationStatus(StrEnum):
 
 
 class KrakenQualificationReason(StrEnum):
+    KRAKEN_SOURCE_INVALID = "KRAKEN_SOURCE_INVALID"
     KRAKEN_PUBLIC_QUALIFIED = "KRAKEN_PUBLIC_QUALIFIED"
     KRAKEN_EVIDENCE_INVALID = "KRAKEN_EVIDENCE_INVALID"
     KRAKEN_PUBLIC_UNAVAILABLE = "KRAKEN_PUBLIC_UNAVAILABLE"
@@ -35,6 +36,11 @@ class KrakenQualificationResult(EvidenceRecord):
     mapping_identity: ContentIdentity | None
     evidence_identities: tuple[ContentIdentity, ...]
     route_allowlist: tuple[str, ...]
+    source_commit_sha: str | None = None
+    source_tree_sha: str | None = None
+    repository_identity: ContentIdentity | None = None
+    source_identity: ContentIdentity | None = None
+    release_binding: str = "NOT_ESTABLISHED_PRE_MERGE"
     real_economic_calls: int = 0
     live: str = "LIVE_FORBIDDEN"
     side_effect_performed: bool = False
@@ -48,7 +54,8 @@ class KrakenQualificationResult(EvidenceRecord):
             "/0/public/Ticker",
         }
         if (
-            self.venue is not VenueId.KRAKEN_SPOT
+            self.release_binding != "NOT_ESTABLISHED_PRE_MERGE"
+            or self.venue is not VenueId.KRAKEN
             or self.real_economic_calls != 0
             or self.live != "LIVE_FORBIDDEN"
             or self.side_effect_performed is not False

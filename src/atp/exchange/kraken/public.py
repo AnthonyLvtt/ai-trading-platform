@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import re
 import ssl
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from http.client import HTTPException, HTTPSConnection
@@ -16,6 +18,7 @@ from atp.exchange.contracts import (
     PublicCandle,
     PublicCandleEvidence,
     PublicInstrumentMetadata,
+    PublicObservation,
     PublicPriceEvidence,
     PublicServerTimeEvidence,
     PublicSystemStatusEvidence,
@@ -162,7 +165,7 @@ def parse_server_time(payload: object, observed_at: datetime) -> PublicServerTim
     if type(result["rfc1123"]) is not str or not result["rfc1123"]:
         raise EvidenceError("KRAKEN_TIME_INVALID")
     return PublicServerTimeEvidence(
-        VenueId.KRAKEN_SPOT,
+        VenueId.KRAKEN,
         _utc_from_seconds(result["unixtime"]),
         observed_at,
         _source_identity(payload),
@@ -182,7 +185,7 @@ def parse_system_status(payload: object, observed_at: datetime) -> PublicSystemS
     ):
         raise EvidenceError("KRAKEN_STATUS_INVALID")
     return PublicSystemStatusEvidence(
-        VenueId.KRAKEN_SPOT,
+        VenueId.KRAKEN,
         result["status"],
         _iso_time(result["timestamp"]),
         observed_at,
@@ -253,11 +256,19 @@ def parse_asset_pairs(
     aliases = tuple(dict.fromkeys((native, raw["altname"], raw["wsname"])))
     source = _source_identity(payload)
     mapping = VenueInstrumentMappingEvidence(
-        VenueId.KRAKEN_SPOT, instrument, native, aliases, source
+        VenueId.KRAKEN,
+        instrument,
+        native,
+        aliases,
+        source,
+        str(raw["base"]),
+        str(raw["quote"]),
+        raw["status"],
+        observed_at,
     )
     quantity_increment = Decimal(1).scaleb(-raw["lot_decimals"])
     return mapping, PublicInstrumentMetadata(
-        VenueId.KRAKEN_SPOT,
+        VenueId.KRAKEN,
         instrument,
         mapping.content_identity,
         raw["status"],
@@ -273,7 +284,7 @@ def parse_asset_pairs(
 def _mapping_for(
     instrument: CanonicalInstrumentId, mapping: VenueInstrumentMappingEvidence
 ) -> None:
-    if mapping.venue is not VenueId.KRAKEN_SPOT or mapping.instrument != instrument:
+    if mapping.venue is not VenueId.KRAKEN or mapping.instrument != instrument:
         raise EvidenceError("FOREIGN_MAPPING")
 
 
@@ -310,12 +321,20 @@ def parse_closed_ohlc(
         ):
             raise EvidenceError("KRAKEN_OHLC_INVALID")
         candles.append(candle)
-    if not candles or any(
-        right.open_time <= left.open_time for left, right in zip(candles, candles[1:], strict=False)
+    step = timedelta(minutes=5)
+    if (
+        timedelta(minutes=interval_minutes) != step
+        or observed_at.tzinfo is None
+        or any(c.open_time.timestamp() % 300 != 0 for c in candles)
+        or any(
+            right.open_time - left.open_time != step
+            for left, right in zip(candles, candles[1:], strict=False)
+        )
+        or not timedelta(0) <= observed_at - (candles[-1].open_time + step) < step
     ):
         raise EvidenceError("KRAKEN_OHLC_INVALID")
     return PublicCandleEvidence(
-        VenueId.KRAKEN_SPOT,
+        VenueId.KRAKEN,
         instrument,
         mapping.content_identity,
         tuple(candles),
@@ -329,6 +348,7 @@ def parse_ticker_price(
     instrument: CanonicalInstrumentId,
     mapping: VenueInstrumentMappingEvidence,
     observed_at: datetime,
+    observation: PublicObservation | None = None,
 ) -> PublicPriceEvidence:
     _mapping_for(instrument, mapping)
     result = _envelope(payload)
@@ -342,64 +362,82 @@ def parse_ticker_price(
     if type(close) is not list or len(close) != 2:
         raise EvidenceError("KRAKEN_TICKER_INVALID")
     return PublicPriceEvidence(
-        VenueId.KRAKEN_SPOT,
+        VenueId.KRAKEN,
         instrument,
         mapping.content_identity,
         _decimal(close[0], positive=True),
         "KRAKEN_TICKER_LAST_TRADE",
         observed_at,
         _source_identity(payload),
+        observation,
+        "OBSERVATION_FRESH" if observation is not None else "UNKNOWN",
     )
 
 
 class KrakenPublicClient:
-    venue = VenueId.KRAKEN_SPOT
+    __slots__ = ("_transport", "_clock")
+    venue = VenueId.KRAKEN
 
-    def __init__(self, transport: KrakenPublicTransport) -> None:
+    def __init__(
+        self,
+        transport: KrakenPublicTransport,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
         self._transport = transport
+        self._clock = clock
 
-    def server_time(self, observed_at: datetime) -> PublicServerTimeEvidence:
-        return parse_server_time(self._transport.get("/0/public/Time"), observed_at)
+    def _get(
+        self, route: str, parameters: tuple[tuple[str, str], ...] = ()
+    ) -> tuple[object, PublicObservation]:
+        start = self._clock()
+        payload = self._transport.get(route, parameters)
+        end = self._clock()
+        return payload, PublicObservation(start, end)
 
-    def system_status(self, observed_at: datetime) -> PublicSystemStatusEvidence:
-        return parse_system_status(self._transport.get("/0/public/SystemStatus"), observed_at)
+    def server_time(self, observed_at: datetime | None = None) -> PublicServerTimeEvidence:
+        payload, timing = self._get("/0/public/Time")
+        result = parse_server_time(payload, timing.response_received_at)
+        # Include server timestamp precision (whole seconds) in the bounded interval.
+        if (
+            not timing.request_started_at - timedelta(seconds=5)
+            <= result.server_time
+            <= timing.response_received_at + timedelta(seconds=5)
+        ):
+            raise EvidenceError("KRAKEN_CLOCK_SKEW")
+        return replace(result, observation=timing)
+
+    def system_status(self, observed_at: datetime | None = None) -> PublicSystemStatusEvidence:
+        payload, timing = self._get("/0/public/SystemStatus")
+        return parse_system_status(payload, timing.response_received_at)
 
     def instrument_metadata(
-        self, instrument: CanonicalInstrumentId, observed_at: datetime
+        self, instrument: CanonicalInstrumentId, observed_at: datetime | None = None
     ) -> tuple[VenueInstrumentMappingEvidence, PublicInstrumentMetadata]:
-        return parse_asset_pairs(
-            self._transport.get("/0/public/AssetPairs"), instrument, observed_at
-        )
+        payload, timing = self._get("/0/public/AssetPairs")
+        return parse_asset_pairs(payload, instrument, timing.response_received_at)
 
     def closed_candles(
         self,
         instrument: CanonicalInstrumentId,
         mapping: VenueInstrumentMappingEvidence,
         interval_minutes: int,
-        observed_at: datetime,
+        observed_at: datetime | None = None,
     ) -> PublicCandleEvidence:
         _mapping_for(instrument, mapping)
+        payload, timing = self._get(
+            "/0/public/OHLC",
+            (("pair", mapping.native_identifier), ("interval", str(interval_minutes))),
+        )
         return parse_closed_ohlc(
-            self._transport.get(
-                "/0/public/OHLC",
-                (("pair", mapping.native_identifier), ("interval", str(interval_minutes))),
-            ),
-            instrument,
-            mapping,
-            interval_minutes,
-            observed_at,
+            payload, instrument, mapping, interval_minutes, timing.response_received_at
         )
 
     def price(
         self,
         instrument: CanonicalInstrumentId,
         mapping: VenueInstrumentMappingEvidence,
-        observed_at: datetime,
+        observed_at: datetime | None = None,
     ) -> PublicPriceEvidence:
         _mapping_for(instrument, mapping)
-        return parse_ticker_price(
-            self._transport.get("/0/public/Ticker", (("pair", mapping.native_identifier),)),
-            instrument,
-            mapping,
-            observed_at,
-        )
+        payload, timing = self._get("/0/public/Ticker", (("pair", mapping.native_identifier),))
+        return parse_ticker_price(payload, instrument, mapping, timing.response_received_at, timing)

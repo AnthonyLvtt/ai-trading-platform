@@ -19,8 +19,8 @@ from atp.shared.identity import ContentIdentity
 
 
 class VenueId(StrEnum):
-    BINANCE_SPOT = "BINANCE_SPOT"
-    KRAKEN_SPOT = "KRAKEN_SPOT"
+    BINANCE = "BINANCE"
+    KRAKEN = "KRAKEN"
 
 
 class MarketKind(StrEnum):
@@ -61,6 +61,10 @@ class VenueInstrumentMappingEvidence(EvidenceRecord):
     native_identifier: str
     native_aliases: tuple[str, ...]
     metadata_identity: ContentIdentity
+    native_base_asset: str
+    native_quote_asset: str
+    instrument_status: str
+    observed_at: datetime
 
     def __post_init__(self) -> None:
         if (
@@ -72,9 +76,29 @@ class VenueInstrumentMappingEvidence(EvidenceRecord):
             or not self.native_aliases
             or any(type(alias) is not str or not alias for alias in self.native_aliases)
             or len(set(self.native_aliases)) != len(self.native_aliases)
+            or any(
+                type(v) is not str or not v
+                for v in (self.native_base_asset, self.native_quote_asset, self.instrument_status)
+            )
+            or self.observed_at.tzinfo is None
             or type(self.metadata_identity) is not ContentIdentity
         ):
             raise EvidenceError("INVALID_INSTRUMENT_MAPPING")
+        EvidenceRecord.__post_init__(self)
+
+
+@dataclass(frozen=True, slots=True)
+class PublicObservation(EvidenceRecord):
+    request_started_at: datetime
+    response_received_at: datetime
+
+    def __post_init__(self) -> None:
+        if (
+            self.request_started_at.tzinfo is None
+            or self.response_received_at.tzinfo is None
+            or not 0 <= (self.response_received_at - self.request_started_at).total_seconds() <= 10
+        ):
+            raise EvidenceError("PUBLIC_OBSERVATION_UNBOUNDED")
         EvidenceRecord.__post_init__(self)
 
 
@@ -84,6 +108,7 @@ class PublicServerTimeEvidence(EvidenceRecord):
     server_time: datetime
     observed_at: datetime
     source_identity: ContentIdentity
+    observation: PublicObservation | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +165,20 @@ class PublicPriceEvidence(EvidenceRecord):
     source: str
     observed_at: datetime
     source_identity: ContentIdentity
+    observation: PublicObservation | None = None
+    freshness: str = "UNKNOWN"
+    event_time: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.freshness not in {"UNKNOWN", "OBSERVATION_FRESH"} or (
+            self.freshness == "OBSERVATION_FRESH"
+            and (
+                self.observation is None
+                or self.observation.response_received_at != self.observed_at
+            )
+        ):
+            raise EvidenceError("PUBLIC_PRICE_FRESHNESS_INVALID")
+        EvidenceRecord.__post_init__(self)
 
 
 class PublicExchangePort(Protocol):

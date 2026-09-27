@@ -1,6 +1,8 @@
 """Fail-closed Kraken public qualification, independent from Binance TQ."""
 
-from datetime import UTC, datetime
+from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
 
 from atp.exchange.contracts import (
     BTC_EUR,
@@ -21,6 +23,8 @@ from atp.kraken_qualification.model import (
     KrakenQualificationResult,
     KrakenQualificationStatus,
 )
+from atp.release_deployment.model import ReleaseError
+from atp.release_deployment.source import inspect_source
 
 
 def _result(
@@ -38,7 +42,7 @@ def _result(
         level,
         status,
         reason,
-        VenueId.KRAKEN_SPOT,
+        VenueId.KRAKEN,
         instrument.content_identity,
         mapping.content_identity if mapping is not None else None,
         identities,
@@ -46,7 +50,7 @@ def _result(
     )
 
 
-def qualify_offline(
+def _qualify_offline(
     instrument: object,
     mapping: object,
     metadata: object,
@@ -83,10 +87,7 @@ def qualify_offline(
         )
     evidence = (mapping, metadata, server_time, system_status, candles, price)
     if (
-        any(
-            getattr(value, "venue", VenueId.KRAKEN_SPOT) is not VenueId.KRAKEN_SPOT
-            for value in evidence
-        )
+        any(getattr(value, "venue", VenueId.KRAKEN) is not VenueId.KRAKEN for value in evidence)
         or any(
             getattr(value, "instrument", instrument) != instrument
             for value in (mapping, metadata, candles, price)
@@ -101,6 +102,23 @@ def qualify_offline(
         or not candles.candles
         or not isinstance(price, PublicPriceEvidence)
         or price.source != "KRAKEN_TICKER_LAST_TRADE"
+        or price.freshness != "OBSERVATION_FRESH"
+        or not isinstance(server_time, PublicServerTimeEvidence)
+        or abs((server_time.server_time - server_time.observed_at).total_seconds()) > 15
+        or any(
+            abs(
+                (
+                    price.observed_at - getattr(value, "observed_at", price.observed_at)
+                ).total_seconds()
+            )
+            > 60
+            for value in evidence
+        )
+        or not isinstance(metadata, PublicInstrumentMetadata)
+        or mapping.metadata_identity != metadata.source_identity
+        or mapping.observed_at != metadata.observed_at
+        or mapping.instrument_status != metadata.status
+        or mapping.instrument_status != "online"
     ):
         reason = (
             KrakenQualificationReason.KRAKEN_SYSTEM_NOT_ONLINE
@@ -126,21 +144,19 @@ def qualify_offline(
     )
 
 
-def qualify_public_connectivity(
+def _qualify_public_connectivity(
     client: KrakenPublicClient,
     *,
     instrument: CanonicalInstrumentId = BTC_EUR,
-    observed_at: datetime | None = None,
 ) -> KrakenQualificationResult:
     """Explicit network path. Ordinary tests never invoke this function with HTTP transport."""
-    at = datetime.now(UTC) if observed_at is None else observed_at
     try:
-        server_time = client.server_time(at)
-        status = client.system_status(at)
-        mapping, metadata = client.instrument_metadata(instrument, at)
-        candles = client.closed_candles(instrument, mapping, 5, at)
-        price = client.price(instrument, mapping, at)
-        offline = qualify_offline(
+        server_time = client.server_time()
+        status = client.system_status()
+        mapping, metadata = client.instrument_metadata(instrument)
+        candles = client.closed_candles(instrument, mapping, 5)
+        price = client.price(instrument, mapping)
+        offline = _qualify_offline(
             instrument, mapping, metadata, server_time, status, candles, price
         )
         return _result(
@@ -158,3 +174,63 @@ def qualify_public_connectivity(
             KrakenQualificationReason.KRAKEN_PUBLIC_UNAVAILABLE,
             instrument,
         )
+
+
+def _source_bound(
+    root: Path, level: KrakenQualificationLevel, run: Callable[[], KrakenQualificationResult]
+) -> KrakenQualificationResult:
+    try:
+        before = inspect_source(root)
+        if not before.clean:
+            raise ValueError("dirty source")
+        result = run()
+        after = inspect_source(root)
+        if before != after or not after.clean:
+            raise ValueError("source changed")
+        return replace(
+            result,
+            source_commit_sha=before.source_commit_sha,
+            source_tree_sha=before.git_tree_sha,
+            repository_identity=before.repository_identity,
+            source_identity=before.content_identity,
+        )
+    except (ReleaseError, OSError, ValueError):
+        return _result(
+            level,
+            KrakenQualificationStatus.FAILED,
+            KrakenQualificationReason.KRAKEN_SOURCE_INVALID,
+            BTC_EUR,
+        )
+
+
+def qualify_offline(
+    instrument: object,
+    mapping: object,
+    metadata: object,
+    server_time: object,
+    system_status: object,
+    candles: object,
+    price: object,
+    *,
+    source_root: Path | None = None,
+) -> KrakenQualificationResult:
+    return _source_bound(
+        Path.cwd() if source_root is None else source_root,
+        KrakenQualificationLevel.OFFLINE_CONTRACT,
+        lambda: _qualify_offline(
+            instrument, mapping, metadata, server_time, system_status, candles, price
+        ),
+    )
+
+
+def qualify_public_connectivity(
+    client: KrakenPublicClient,
+    *,
+    instrument: CanonicalInstrumentId = BTC_EUR,
+    source_root: Path | None = None,
+) -> KrakenQualificationResult:
+    return _source_bound(
+        Path.cwd() if source_root is None else source_root,
+        KrakenQualificationLevel.PUBLIC_CONNECTIVITY,
+        lambda: _qualify_public_connectivity(client, instrument=instrument),
+    )

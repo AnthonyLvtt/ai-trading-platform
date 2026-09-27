@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -51,14 +51,14 @@ def evidence():
 
 def test_offline_parsers_resolve_btc_eur_and_closed_candles() -> None:
     mapping, metadata = evidence()
-    assert mapping.venue is VenueId.KRAKEN_SPOT
+    assert mapping.venue is VenueId.KRAKEN
     assert mapping.instrument == BTC_EUR
     assert mapping.native_identifier == "XXBTZEUR"
     assert mapping.native_aliases == ("XXBTZEUR", "XBTEUR", "XBT/EUR")
     assert metadata.mapping_identity == mapping.content_identity
     assert str(metadata.price_increment) == "0.1"
     assert str(metadata.quantity_increment) == "1E-8"
-    assert parse_server_time(fixture("time.json"), AT).venue is VenueId.KRAKEN_SPOT
+    assert parse_server_time(fixture("time.json"), AT).venue is VenueId.KRAKEN
     assert parse_system_status(fixture("system-status.json"), AT).status == "online"
     candles = parse_closed_ohlc(fixture("ohlc.json"), BTC_EUR, mapping, 5, AT)
     assert len(candles.candles) == 2
@@ -96,7 +96,7 @@ def test_unknown_fields_errors_and_foreign_mappings_fail_closed() -> None:
 
 def test_public_client_uses_only_closed_allowlist_and_exact_mapping() -> None:
     transport = FixtureTransport()
-    client = KrakenPublicClient(transport)
+    client = KrakenPublicClient(transport, clock=lambda: AT)
     client.server_time(AT)
     client.system_status(AT)
     mapping, _ = client.instrument_metadata(BTC_EUR, AT)
@@ -122,3 +122,82 @@ def test_http_transport_rejects_every_non_allowlisted_route_without_network() ->
     ):
         with pytest.raises(EvidenceError, match="KRAKEN_PUBLIC_ROUTE_FORBIDDEN"):
             transport.get(path)
+
+
+@pytest.mark.parametrize("change", ["misaligned", "duplicate", "gap", "stale", "future"])
+def test_ohlc_grid_continuity_and_freshness(change):
+    mapping, _ = evidence()
+    payload = fixture("ohlc.json")
+    rows = payload["result"]["XXBTZEUR"]
+    at = AT
+    if change == "misaligned":
+        rows[0][0] += 1
+    elif change == "duplicate":
+        rows[1][0] = rows[0][0]
+    elif change == "gap":
+        rows[0][0] -= 300
+    elif change == "stale":
+        at += timedelta(minutes=5)
+    else:
+        at -= timedelta(minutes=5)
+    with pytest.raises(EvidenceError, match="KRAKEN_OHLC_INVALID"):
+        parse_closed_ohlc(payload, BTC_EUR, mapping, 5, at)
+
+
+def test_uncommitted_row_is_never_in_closed_evidence():
+    mapping, _ = evidence()
+    payload = fixture("ohlc.json")
+    result = parse_closed_ohlc(payload, BTC_EUR, mapping, 5, AT)
+    assert all(
+        c.open_time.timestamp() < payload["result"]["XXBTZEUR"][-1][0] for c in result.candles
+    )
+
+
+def test_mapping_observation_is_self_contained_and_identity_sensitive():
+    from dataclasses import replace
+
+    mapping, _ = evidence()
+    assert (
+        mapping.native_base_asset,
+        mapping.native_quote_asset,
+        mapping.instrument_status,
+        mapping.observed_at,
+    ) == ("XXBT", "ZEUR", "online", AT)
+    for changes in (
+        {"observed_at": AT + timedelta(seconds=1)},
+        {"native_base_asset": "XBT"},
+        {"instrument_status": "cancel_only"},
+    ):
+        assert replace(mapping, **changes).content_identity != mapping.content_identity
+
+
+def test_response_boundary_not_callers_pre_network_time():
+    mapping, _ = evidence()
+    times = iter((AT, AT + timedelta(seconds=2)))
+    client = KrakenPublicClient(FixtureTransport(), clock=lambda: next(times))
+    price = client.price(BTC_EUR, mapping, AT - timedelta(hours=1))
+    assert price.observed_at == AT + timedelta(seconds=2)
+    assert price.observation.request_started_at == AT
+    assert price.freshness == "OBSERVATION_FRESH"
+    assert price.event_time is None
+
+
+@pytest.mark.parametrize("seconds", [-1, 11])
+def test_unbounded_or_rollback_observation_blocks(seconds):
+    times = iter((AT, AT + timedelta(seconds=seconds)))
+    client = KrakenPublicClient(FixtureTransport(), clock=lambda: next(times))
+    with pytest.raises(EvidenceError, match="PUBLIC_OBSERVATION_UNBOUNDED"):
+        client.server_time()
+
+
+def test_clock_skew_blocks():
+    client = KrakenPublicClient(FixtureTransport(), clock=lambda: AT + timedelta(minutes=1))
+    with pytest.raises(EvidenceError, match="KRAKEN_CLOCK_SKEW"):
+        client.server_time()
+
+
+def test_unbounded_ticker_parser_reports_unknown_freshness():
+    mapping, _ = evidence()
+    result = parse_ticker_price(fixture("ticker.json"), BTC_EUR, mapping, AT)
+    assert result.freshness == "UNKNOWN"
+    assert result.event_time is None

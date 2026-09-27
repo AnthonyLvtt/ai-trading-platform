@@ -14,7 +14,7 @@ from atp.shared.identity import ContentIdentity
 
 @dataclass(frozen=True, slots=True)
 class BinanceCompatibility:
-    venue: VenueId = VenueId.BINANCE_SPOT
+    venue: VenueId = VenueId.BINANCE
 
     @property
     def policy_identity(self) -> ContentIdentity:

@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
 
@@ -35,18 +36,22 @@ def test_explicit_venue_selection_and_foreign_mapping_fail_closed() -> None:
     from atp.exchange.contracts import VenueInstrumentMappingEvidence
 
     with pytest.raises(VenueSelectionError, match="VENUE_MISMATCH"):
-        SelectedPublicExchange(VenueId.KRAKEN_SPOT, Port(VenueId.BINANCE_SPOT))  # type: ignore[arg-type]
-    selected = SelectedPublicExchange(VenueId.KRAKEN_SPOT, Port(VenueId.KRAKEN_SPOT))  # type: ignore[arg-type]
+        SelectedPublicExchange(VenueId.KRAKEN, Port(VenueId.BINANCE))  # type: ignore[arg-type]
+    selected = SelectedPublicExchange(VenueId.KRAKEN, Port(VenueId.KRAKEN))  # type: ignore[arg-type]
     mapping = VenueInstrumentMappingEvidence(
-        VenueId.KRAKEN_SPOT,
+        VenueId.KRAKEN,
         BTC_EUR,
         "XXBTZEUR",
         ("XXBTZEUR", "XBTEUR", "XBT/EUR"),
         ContentIdentity.from_text("metadata"),
+        "XXBT",
+        "ZEUR",
+        "online",
+        datetime(2026, 9, 24, tzinfo=UTC),
     )
     selected.require_mapping(BTC_EUR, mapping)
     with pytest.raises(VenueSelectionError, match="FOREIGN_MAPPING"):
         selected.require_mapping(BTC_USDT, mapping)
-    foreign = replace(mapping, venue=VenueId.BINANCE_SPOT)
+    foreign = replace(mapping, venue=VenueId.BINANCE)
     with pytest.raises(VenueSelectionError, match="FOREIGN_MAPPING"):
         selected.require_mapping(BTC_EUR, foreign)
