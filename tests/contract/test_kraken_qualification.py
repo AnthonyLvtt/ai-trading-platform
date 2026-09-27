@@ -147,3 +147,61 @@ def test_unknown_price_freshness_fails_qualification():
         parse_ticker_price(fixture("ticker.json"), BTC_EUR, mapping, AT),
     )
     assert result.status is KrakenQualificationStatus.FAILED
+
+
+@pytest.mark.parametrize(
+    "field", ["source_commit_sha", "source_tree_sha", "repository_identity", "source_identity"]
+)
+def test_passed_record_requires_each_source_binding(field):
+    result = offline_result()
+    with pytest.raises(EvidenceError, match="^INVALID_KRAKEN_QUALIFICATION_RESULT$"):
+        replace(result, **{field: None})
+
+
+@pytest.mark.parametrize("field", ["source_commit_sha", "source_tree_sha"])
+@pytest.mark.parametrize(
+    "invalid", ["", "a" * 39, "a" * 41, "A" * 40, "g" * 40, "a" * 40 + "\n", 123]
+)
+def test_passed_record_requires_exact_lowercase_sha(field, invalid):
+    with pytest.raises(EvidenceError, match="^INVALID_KRAKEN_QUALIFICATION_RESULT$"):
+        replace(offline_result(), **{field: invalid})
+
+
+@pytest.mark.parametrize("field", ["repository_identity", "source_identity"])
+def test_passed_record_requires_typed_content_identity(field):
+    result = offline_result()
+    with pytest.raises(EvidenceError, match="^INVALID_KRAKEN_QUALIFICATION_RESULT$"):
+        replace(result, **{field: str(getattr(result, field))})
+
+
+def test_bound_passed_record_validates_and_cannot_claim_release():
+    from atp.exchange.read_only import verify_record
+    from atp.kraken_qualification.model import KrakenQualificationResult
+
+    result = offline_result()
+    assert result.status is KrakenQualificationStatus.PASSED
+    assert verify_record(result, KrakenQualificationResult)
+    with pytest.raises(EvidenceError, match="^INVALID_KRAKEN_QUALIFICATION_RESULT$"):
+        replace(result, release_binding="ESTABLISHED")
+
+
+def test_inspection_failure_emits_valid_failed_record_without_source(monkeypatch):
+    from atp.exchange.read_only import verify_record
+    from atp.kraken_qualification.model import KrakenQualificationResult
+
+    def unavailable(root):
+        raise OSError("unavailable")
+
+    monkeypatch.setattr("atp.kraken_qualification.engine.inspect_source", unavailable)
+    result = offline_result()
+    assert result.status is KrakenQualificationStatus.FAILED
+    assert all(
+        getattr(result, field) is None
+        for field in (
+            "source_commit_sha",
+            "source_tree_sha",
+            "repository_identity",
+            "source_identity",
+        )
+    )
+    assert verify_record(result, KrakenQualificationResult)

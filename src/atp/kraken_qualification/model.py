@@ -1,5 +1,6 @@
 """Kraken-only public qualification identities and results."""
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -54,7 +55,19 @@ class KrakenQualificationResult(EvidenceRecord):
             "/0/public/Ticker",
         }
         if (
-            self.release_binding != "NOT_ESTABLISHED_PRE_MERGE"
+            type(self.status) is not KrakenQualificationStatus
+            or (
+                self.status is KrakenQualificationStatus.PASSED
+                and (
+                    type(self.source_commit_sha) is not str
+                    or re.fullmatch(r"[0-9a-f]{40}", self.source_commit_sha) is None
+                    or type(self.source_tree_sha) is not str
+                    or re.fullmatch(r"[0-9a-f]{40}", self.source_tree_sha) is None
+                    or type(self.repository_identity) is not ContentIdentity
+                    or type(self.source_identity) is not ContentIdentity
+                )
+            )
+            or self.release_binding != "NOT_ESTABLISHED_PRE_MERGE"
             or self.venue is not VenueId.KRAKEN
             or self.real_economic_calls != 0
             or self.live != "LIVE_FORBIDDEN"

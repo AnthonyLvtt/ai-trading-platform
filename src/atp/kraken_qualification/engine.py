@@ -1,7 +1,7 @@
 """Fail-closed Kraken public qualification, independent from Binance TQ."""
 
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from atp.exchange.contracts import (
@@ -23,8 +23,40 @@ from atp.kraken_qualification.model import (
     KrakenQualificationResult,
     KrakenQualificationStatus,
 )
-from atp.release_deployment.model import ReleaseError
+from atp.release_deployment.model import ReleaseError, SourceTree
 from atp.release_deployment.source import inspect_source
+from atp.shared.identity import ContentIdentity
+
+
+@dataclass(frozen=True, slots=True)
+class _Evaluation:
+    """Internal evaluation only: not a serializable qualification evidence record."""
+
+    level: KrakenQualificationLevel
+    status: KrakenQualificationStatus
+    reason_code: KrakenQualificationReason
+    venue: VenueId
+    instrument_identity: ContentIdentity
+    mapping_identity: ContentIdentity | None
+    evidence_identities: tuple[ContentIdentity, ...]
+    route_allowlist: tuple[str, ...]
+
+
+def _bind(result: _Evaluation, source: SourceTree | None) -> KrakenQualificationResult:
+    return KrakenQualificationResult(
+        result.level,
+        result.status,
+        result.reason_code,
+        result.venue,
+        result.instrument_identity,
+        result.mapping_identity,
+        result.evidence_identities,
+        result.route_allowlist,
+        source_commit_sha=None if source is None else source.source_commit_sha,
+        source_tree_sha=None if source is None else source.git_tree_sha,
+        repository_identity=None if source is None else source.repository_identity,
+        source_identity=None if source is None else source.content_identity,
+    )
 
 
 def _result(
@@ -34,11 +66,11 @@ def _result(
     instrument: CanonicalInstrumentId,
     mapping: VenueInstrumentMappingEvidence | None = None,
     evidence: tuple[object, ...] = (),
-) -> KrakenQualificationResult:
+) -> _Evaluation:
     identities = tuple(
         item.content_identity for item in evidence if hasattr(item, "content_identity")
     )
-    return KrakenQualificationResult(
+    return _Evaluation(
         level,
         status,
         reason,
@@ -58,7 +90,7 @@ def _qualify_offline(
     system_status: object,
     candles: object,
     price: object,
-) -> KrakenQualificationResult:
+) -> _Evaluation:
     if not verify_record(instrument, CanonicalInstrumentId) or not isinstance(
         instrument, CanonicalInstrumentId
     ):
@@ -148,7 +180,7 @@ def _qualify_public_connectivity(
     client: KrakenPublicClient,
     *,
     instrument: CanonicalInstrumentId = BTC_EUR,
-) -> KrakenQualificationResult:
+) -> _Evaluation:
     """Explicit network path. Ordinary tests never invoke this function with HTTP transport."""
     try:
         server_time = client.server_time()
@@ -177,7 +209,7 @@ def _qualify_public_connectivity(
 
 
 def _source_bound(
-    root: Path, level: KrakenQualificationLevel, run: Callable[[], KrakenQualificationResult]
+    root: Path, level: KrakenQualificationLevel, run: Callable[[], _Evaluation]
 ) -> KrakenQualificationResult:
     try:
         before = inspect_source(root)
@@ -187,19 +219,16 @@ def _source_bound(
         after = inspect_source(root)
         if before != after or not after.clean:
             raise ValueError("source changed")
-        return replace(
-            result,
-            source_commit_sha=before.source_commit_sha,
-            source_tree_sha=before.git_tree_sha,
-            repository_identity=before.repository_identity,
-            source_identity=before.content_identity,
-        )
+        return _bind(result, before)
     except (ReleaseError, OSError, ValueError):
-        return _result(
-            level,
-            KrakenQualificationStatus.FAILED,
-            KrakenQualificationReason.KRAKEN_SOURCE_INVALID,
-            BTC_EUR,
+        return _bind(
+            _result(
+                level,
+                KrakenQualificationStatus.FAILED,
+                KrakenQualificationReason.KRAKEN_SOURCE_INVALID,
+                BTC_EUR,
+            ),
+            None,
         )
 
 
