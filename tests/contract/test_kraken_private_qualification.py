@@ -34,8 +34,8 @@ def test_offline_qualification_is_source_bound_and_non_economic(clean_source) ->
 
 
 def test_invalid_evidence_fails_qualification() -> None:
-    ref, capability, balances, orders = evidence()
-    result = qualify_private_offline(ref, capability, object(), orders)
+    ref, capability, balances, request, orders = evidence()
+    result = qualify_private_offline(ref, capability, object(), request, orders)
     assert result.status is KrakenPrivateQualificationStatus.FAILED
     assert result.real_economic_calls == 0
 
@@ -57,3 +57,20 @@ def test_no_binance_fallback_is_representable() -> None:
     assert all(route.startswith("/0/private/") for route in result.route_allowlist)
     assert not hasattr(result, "fallback")
     assert not hasattr(result, "transport")
+
+
+@pytest.mark.parametrize(
+    ("index", "field"),
+    [
+        (1, "submission_authorized"),
+        (1, "side_effect_performed"),
+        (2, "side_effect_performed"),
+        (4, "side_effect_performed"),
+    ],
+)
+def test_tampered_authority_or_side_effect_evidence_cannot_pass(index: int, field: str) -> None:
+    values = list(evidence())
+    object.__setattr__(values[index], field, True)
+    result = qualify_private_offline(*values)
+    assert result.status is KrakenPrivateQualificationStatus.FAILED
+    assert result.real_economic_calls == 0

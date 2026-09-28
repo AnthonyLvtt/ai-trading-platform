@@ -8,7 +8,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from atp.exchange.contracts import VenueId
-from atp.exchange.kraken.private import parse_api_key_info, parse_balances, parse_open_orders
+from atp.exchange.kraken.private import (
+    account_wide_open_orders_request,
+    parse_api_key_info,
+    parse_balances,
+    parse_open_orders,
+)
 from atp.exchange.private_contracts import PrivateCredentialReference
 from atp.exchange.read_only import encoded
 from atp.kraken_private_qualification import qualify_private_offline
@@ -38,11 +43,21 @@ def main() -> int:
     balances = parse_balances(
         _load(args.fixtures, "balance.json"), reference, capability, observed_at
     )
+    open_orders_request = account_wide_open_orders_request(reference)
     open_orders = parse_open_orders(
-        _load(args.fixtures, "open-orders.json"), reference, capability, observed_at
+        _load(args.fixtures, "open-orders.json"),
+        reference,
+        capability,
+        open_orders_request,
+        observed_at,
     )
     result = qualify_private_offline(
-        reference, capability, balances, open_orders, source_root=args.source_root
+        reference,
+        capability,
+        balances,
+        open_orders_request,
+        open_orders,
+        source_root=args.source_root,
     )
     document = dict(encoded(result)) | {"content_identity": str(result.content_identity)}
     print(json.dumps(document, sort_keys=True, separators=(",", ":")))

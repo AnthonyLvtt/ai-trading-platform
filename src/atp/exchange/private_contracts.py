@@ -67,6 +67,8 @@ class PrivateCredentialCapabilityEvidence(EvidenceRecord):
             or self.withdrawal_capability_absent is not True
             or self.observed_at.tzinfo is None
             or type(self.source_identity) is not ContentIdentity
+            or self.submission_authorized is not False
+            or self.side_effect_performed is not False
         ):
             raise EvidenceError("INVALID_PRIVATE_CREDENTIAL_CAPABILITY")
         EvidenceRecord.__post_init__(self)
@@ -109,6 +111,7 @@ class AccountBalanceEvidence(EvidenceRecord):
             or self.scope != "ACCOUNT_WIDE_DEFAULT_WALLET"
             or self.observed_at.tzinfo is None
             or type(self.source_identity) is not ContentIdentity
+            or self.side_effect_performed is not False
         ):
             raise EvidenceError("INVALID_ACCOUNT_BALANCE_EVIDENCE")
         EvidenceRecord.__post_init__(self)
@@ -144,6 +147,7 @@ class AccountOpenOrdersEvidence(EvidenceRecord):
     venue: VenueId
     credential_reference_identity: ContentIdentity
     capability_identity: ContentIdentity
+    request_identity: ContentIdentity
     orders: tuple[CanonicalOpenOrder, ...]
     scope: str
     complete: bool
@@ -157,12 +161,14 @@ class AccountOpenOrdersEvidence(EvidenceRecord):
             self.venue is not VenueId.KRAKEN
             or type(self.credential_reference_identity) is not ContentIdentity
             or type(self.capability_identity) is not ContentIdentity
+            or type(self.request_identity) is not ContentIdentity
             or ids != tuple(sorted(ids))
             or len(set(ids)) != len(ids)
             or self.scope != "ACCOUNT_WIDE"
             or self.complete is not True
             or self.observed_at.tzinfo is None
             or type(self.source_identity) is not ContentIdentity
+            or self.side_effect_performed is not False
         ):
             raise EvidenceError("INVALID_ACCOUNT_OPEN_ORDERS_EVIDENCE")
         EvidenceRecord.__post_init__(self)

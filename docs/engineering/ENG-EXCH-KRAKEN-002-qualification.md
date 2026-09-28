@@ -15,6 +15,13 @@ funding and withdrawal paths are not representable. Normal tests and the
 qualification runner consume local fixtures only. Private network calls remain
 zero.
 
+Every approved read request has an empty parameter tuple. In particular,
+`KrakenAccountWideOpenOrdersRequest` fixes the route to `OpenOrders`, the scope
+to `ACCOUNT_WIDE`, and parameters to `()`. Filters such as `userref` and every
+other parameter are rejected before signing. The response evidence binds the
+exact request content identity; qualification verifies this binding before it
+accepts `complete=True`.
+
 `GetApiKeyInfo` is reduced to the exact permissions `query-funds` and
 `query-open-trades`. Key value, key label, nonce state, IIBAN, IP allowlist and
 usage timestamps never enter evidence. Any additional permission fails the
@@ -28,6 +35,10 @@ must have no leverage. Unknown pairs, leverage and order types fail closed.
 The nonce provider is process-local and bound to one opaque credential reference.
 It serializes concurrent calls and blocks clock rollback. It does not claim
 cross-process safety; no private network runtime is authorized in this mission.
+
+Capability, balance and open-order evidence explicitly require every authority
+or side-effect marker to remain false. Qualification repeats these checks as a
+defense in depth.
 
 References:
 

@@ -2,8 +2,10 @@
 
 from atp.exchange.kraken.private import (
     KRAKEN_PRIVATE_READ_ROUTE_ALLOWLIST,
+    KrakenAccountWideOpenOrdersRequest,
     KrakenPrivateReadRoute,
     MonotonicNonceProvider,
+    account_wide_open_orders_request,
     parse_api_key_info,
     parse_balances,
     parse_open_orders,
@@ -24,11 +26,13 @@ from atp.exchange.kraken.public import (
 __all__ = [
     "KRAKEN_PUBLIC_ROUTE_ALLOWLIST",
     "KRAKEN_PRIVATE_READ_ROUTE_ALLOWLIST",
+    "KrakenAccountWideOpenOrdersRequest",
     "KrakenPrivateReadRoute",
     "KrakenPublicClient",
     "KrakenPublicHTTPTransport",
     "KrakenPublicTransport",
     "MonotonicNonceProvider",
+    "account_wide_open_orders_request",
     "parse_api_key_info",
     "parse_balances",
     "parse_open_orders",

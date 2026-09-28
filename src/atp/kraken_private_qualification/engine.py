@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from atp.exchange.contracts import VenueId
-from atp.exchange.kraken.private import KRAKEN_PRIVATE_READ_ROUTE_ALLOWLIST
+from atp.exchange.kraken.private import (
+    KRAKEN_PRIVATE_READ_ROUTE_ALLOWLIST,
+    KrakenAccountWideOpenOrdersRequest,
+)
 from atp.exchange.private_contracts import (
     AccountBalanceEvidence,
     AccountOpenOrdersEvidence,
@@ -34,12 +37,14 @@ def _evaluate(
     reference: object,
     capability: object,
     balances: object,
+    open_orders_request: object,
     open_orders: object,
 ) -> _Evaluation:
     records = (
         (reference, PrivateCredentialReference),
         (capability, PrivateCredentialCapabilityEvidence),
         (balances, AccountBalanceEvidence),
+        (open_orders_request, KrakenAccountWideOpenOrdersRequest),
         (open_orders, AccountOpenOrdersEvidence),
     )
     if any(not verify_record(value, expected) for value, expected in records) or not isinstance(
@@ -53,19 +58,27 @@ def _evaluate(
         )
     assert isinstance(capability, PrivateCredentialCapabilityEvidence)
     assert isinstance(balances, AccountBalanceEvidence)
+    assert isinstance(open_orders_request, KrakenAccountWideOpenOrdersRequest)
     assert isinstance(open_orders, AccountOpenOrdersEvidence)
-    evidence = (capability, balances, open_orders)
+    observations = (capability, balances, open_orders)
+    evidence = (*observations, open_orders_request)
     if (
         reference.venue is not VenueId.KRAKEN
-        or any(item.venue is not VenueId.KRAKEN for item in evidence)
+        or any(item.venue is not VenueId.KRAKEN for item in observations)
         or any(
             item.credential_reference_identity != reference.content_identity for item in evidence
         )
         or balances.capability_identity != capability.content_identity
         or open_orders.capability_identity != capability.content_identity
+        or open_orders_request.credential_reference_identity != reference.content_identity
+        or open_orders.request_identity != open_orders_request.content_identity
         or balances.scope != "ACCOUNT_WIDE_DEFAULT_WALLET"
         or open_orders.scope != "ACCOUNT_WIDE"
         or open_orders.complete is not True
+        or capability.submission_authorized is not False
+        or capability.side_effect_performed is not False
+        or balances.side_effect_performed is not False
+        or open_orders.side_effect_performed is not False
         or abs((balances.observed_at - capability.observed_at).total_seconds()) > 60
         or abs((open_orders.observed_at - capability.observed_at).total_seconds()) > 60
     ):
@@ -102,6 +115,7 @@ def qualify_private_offline(
     reference: object,
     capability: object,
     balances: object,
+    open_orders_request: object,
     open_orders: object,
     *,
     source_root: Path | None = None,
@@ -111,7 +125,7 @@ def qualify_private_offline(
         before = inspect_source(root)
         if not before.clean:
             raise ValueError("dirty source")
-        evaluation = _evaluate(reference, capability, balances, open_orders)
+        evaluation = _evaluate(reference, capability, balances, open_orders_request, open_orders)
         after = inspect_source(root)
         if before != after or not after.clean:
             raise ValueError("source changed")

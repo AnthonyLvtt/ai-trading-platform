@@ -12,6 +12,7 @@ import hmac
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -27,7 +28,7 @@ from atp.exchange.private_contracts import (
     PrivateCredentialCapabilityEvidence,
     PrivateCredentialReference,
 )
-from atp.exchange.read_only import EvidenceError
+from atp.exchange.read_only import EvidenceError, EvidenceRecord
 from atp.shared.identity import ContentIdentity
 
 
@@ -54,6 +55,33 @@ KRAKEN_WRITE_PERMISSIONS = frozenset(
 
 class KrakenPrivateError(EvidenceError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class KrakenAccountWideOpenOrdersRequest(EvidenceRecord):
+    """Exact semantic request whose identity proves an unfiltered account read."""
+
+    credential_reference_identity: ContentIdentity
+    route: KrakenPrivateReadRoute = KrakenPrivateReadRoute.OPEN_ORDERS
+    parameters: tuple[tuple[str, str], ...] = ()
+    scope: str = "ACCOUNT_WIDE"
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.credential_reference_identity) is not ContentIdentity
+            or self.route is not KrakenPrivateReadRoute.OPEN_ORDERS
+            or self.parameters != ()
+            or self.scope != "ACCOUNT_WIDE"
+        ):
+            raise KrakenPrivateError("KRAKEN_OPEN_ORDERS_REQUEST_INVALID")
+        EvidenceRecord.__post_init__(self)
+
+
+def account_wide_open_orders_request(
+    reference: PrivateCredentialReference,
+) -> KrakenAccountWideOpenOrdersRequest:
+    _bound(reference)
+    return KrakenAccountWideOpenOrdersRequest(reference.content_identity)
 
 
 _NONCE_LOCK = threading.Lock()
@@ -105,7 +133,7 @@ def sign_private_read_request(
         raise KrakenPrivateError("KRAKEN_PRIVATE_ROUTE_FORBIDDEN")
     if type(nonce) is not int or not 0 <= nonce < 2**64:
         raise KrakenPrivateError("KRAKEN_NONCE_INVALID")
-    if any(
+    if parameters or any(
         type(key) is not str or type(value) is not str or not key or key in {"nonce", "otp"}
         for key, value in parameters
     ):
@@ -300,9 +328,18 @@ def parse_open_orders(
     payload: object,
     reference: PrivateCredentialReference,
     capability: PrivateCredentialCapabilityEvidence,
+    request: KrakenAccountWideOpenOrdersRequest,
     observed_at: datetime,
 ) -> AccountOpenOrdersEvidence:
     _bound(reference, capability)
+    if (
+        type(request) is not KrakenAccountWideOpenOrdersRequest
+        or request.credential_reference_identity != reference.content_identity
+        or request.route is not KrakenPrivateReadRoute.OPEN_ORDERS
+        or request.parameters != ()
+        or request.scope != "ACCOUNT_WIDE"
+    ):
+        raise KrakenPrivateError("KRAKEN_OPEN_ORDERS_REQUEST_MISMATCH")
     result = _envelope(payload)
     if type(result) is not dict or set(result) != {"open"} or type(result.get("open")) is not dict:
         raise KrakenPrivateError("KRAKEN_OPEN_ORDERS_INCOMPLETE")
@@ -315,6 +352,7 @@ def parse_open_orders(
         venue=VenueId.KRAKEN,
         credential_reference_identity=reference.content_identity,
         capability_identity=capability.content_identity,
+        request_identity=request.content_identity,
         orders=orders,
         scope="ACCOUNT_WIDE",
         complete=True,
