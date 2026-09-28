@@ -1,0 +1,1 @@
+{"error":[],"result":{"apiKeyName":"atp-read-only","apiKey":"fixture-public-key-never-persisted","nonce":"1700000000000","nonceWindow":0,"permissions":["query-funds","query-open-trades"],"iban":"fixture-iban-never-persisted","validUntil":"0","queryFrom":"0","queryTo":"0","createdTime":"1690000000","modifiedTime":"1690000000","ipAllowlist":["192.0.2.1"],"lastUsed":null}}
