@@ -4,6 +4,7 @@ import hashlib
 
 import pytest
 
+import atp.exchange.kraken.private_credentials as credentials_module
 from atp.exchange.kraken.private_credentials import (
     KrakenCredentialError,
     load_interactive_credential,
@@ -50,3 +51,20 @@ def test_interrupted_acquisition_fails_without_material() -> None:
 
     with pytest.raises(KrakenCredentialError, match="KRAKEN_CREDENTIAL_UNAVAILABLE"):
         load_interactive_credential(reader)
+
+
+def test_partial_buffer_construction_failure_zeroes_existing_buffer(monkeypatch) -> None:
+    created: list[bytearray] = []
+
+    def build(value: str) -> bytearray:
+        buffer = bytearray(value, "ascii")
+        created.append(buffer)
+        return buffer
+
+    monkeypatch.setattr(credentials_module, "_mutable_ascii", build)
+    values = iter(("temporary-api-key", "é"))
+    with pytest.raises(KrakenCredentialError, match="KRAKEN_CREDENTIAL_UNAVAILABLE") as error:
+        load_interactive_credential(lambda _: next(values))
+    assert created == [bytearray(b"\0" * len("temporary-api-key"))]
+    assert "temporary-api-key" not in str(error.value)
+    assert "é" not in str(error.value)

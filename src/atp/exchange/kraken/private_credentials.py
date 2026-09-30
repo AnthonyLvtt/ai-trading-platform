@@ -68,25 +68,40 @@ class EphemeralKrakenCredential:
 CredentialReader = Callable[[str], str]
 
 
+def _mutable_ascii(value: str) -> bytearray:
+    return bytearray(value, "ascii")
+
+
+def _zero_buffer(value: bytearray | None) -> None:
+    if value is not None:
+        value[:] = b"\0" * len(value)
+
+
 def load_interactive_credential(
     reader: CredentialReader = getpass.getpass,
 ) -> EphemeralKrakenCredential:
     """Read both credential values from masked local terminal prompts."""
+    api_key: bytearray | None = None
+    secret: bytearray | None = None
     try:
         api_key_text = reader("Kraken Spot read-only API key: ")
         secret_text = reader("Kraken Spot read-only API secret: ")
-        api_key = bytearray(api_key_text, "ascii")
-        secret = bytearray(secret_text, "ascii")
+        api_key = _mutable_ascii(api_key_text)
+        secret = _mutable_ascii(secret_text)
     except (EOFError, KeyboardInterrupt, UnicodeError, OSError):
+        _zero_buffer(api_key)
+        _zero_buffer(secret)
         raise KrakenCredentialError("KRAKEN_CREDENTIAL_UNAVAILABLE") from None
     finally:
         if "api_key_text" in locals():
             api_key_text = ""
         if "secret_text" in locals():
             secret_text = ""
+    if api_key is None or secret is None:
+        raise KrakenCredentialError("KRAKEN_CREDENTIAL_UNAVAILABLE")
     try:
         return EphemeralKrakenCredential(api_key, secret)
     except KrakenCredentialError:
-        api_key[:] = b"\0" * len(api_key)
-        secret[:] = b"\0" * len(secret)
+        _zero_buffer(api_key)
+        _zero_buffer(secret)
         raise
