@@ -1,4 +1,4 @@
-"""Run fixture-driven Kraken private read-only OFFLINE_CONTRACT qualification."""
+"""Run offline or explicitly operator-invoked Kraken private qualification."""
 
 from __future__ import annotations
 
@@ -14,9 +14,14 @@ from atp.exchange.kraken.private import (
     parse_balances,
     parse_open_orders,
 )
+from atp.exchange.kraken.private_credentials import load_interactive_credential
+from atp.exchange.kraken.private_transport import KrakenPrivateHTTPTransport
 from atp.exchange.private_contracts import PrivateCredentialReference
 from atp.exchange.read_only import encoded
-from atp.kraken_private_qualification import qualify_private_offline
+from atp.kraken_private_qualification import (
+    qualify_private_connectivity,
+    qualify_private_offline,
+)
 from atp.shared.environment import Environment
 
 
@@ -26,14 +31,33 @@ def _load(directory: Path, name: str) -> object:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--level", choices=("OFFLINE_CONTRACT",), required=True)
+    parser.add_argument(
+        "--level", choices=("OFFLINE_CONTRACT", "PRIVATE_CONNECTIVITY"), required=True
+    )
     parser.add_argument(
         "--fixtures",
         type=Path,
         default=Path("tests/fixtures/kraken/private"),
     )
     parser.add_argument("--source-root", type=Path, default=Path.cwd())
+    parser.add_argument("--expected-source-sha")
     args = parser.parse_args()
+
+    if args.level == "PRIVATE_CONNECTIVITY":
+        if args.expected_source_sha is None:
+            parser.error("--expected-source-sha is required for PRIVATE_CONNECTIVITY")
+        result = qualify_private_connectivity(
+            expected_source_sha=args.expected_source_sha,
+            source_root=args.source_root,
+            credential_loader=load_interactive_credential,
+            transport=KrakenPrivateHTTPTransport(),
+        )
+        document = dict(encoded(result)) | {"content_identity": str(result.content_identity)}
+        print(json.dumps(document, sort_keys=True, separators=(",", ":")))
+        return 0 if result.status.value == "PASSED" else 1
+
+    if args.expected_source_sha is not None:
+        parser.error("--expected-source-sha is only valid for PRIVATE_CONNECTIVITY")
 
     observed_at = datetime(2026, 9, 28, 12, tzinfo=UTC)
     reference = PrivateCredentialReference(VenueId.KRAKEN, "0" * 32, Environment.TEST)
