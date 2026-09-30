@@ -122,7 +122,7 @@ class MonotonicNonceProvider:
 def sign_private_read_request(
     route: KrakenPrivateReadRoute,
     nonce: int,
-    secret: str,
+    secret: str | bytes | bytearray,
     parameters: Sequence[tuple[str, str]] = (),
 ) -> tuple[str, str]:
     """Return form body and API-Sign for an allowlisted read route only."""

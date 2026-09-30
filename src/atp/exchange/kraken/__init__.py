@@ -1,4 +1,4 @@
-"""Kraken Spot public/read-only adapter. No credential or economic port exists."""
+"""Kraken Spot public and explicitly bounded private read-only adapters."""
 
 from atp.exchange.kraken.private import (
     KRAKEN_PRIVATE_READ_ROUTE_ALLOWLIST,
@@ -10,6 +10,24 @@ from atp.exchange.kraken.private import (
     parse_balances,
     parse_open_orders,
     sign_private_read_request,
+)
+from atp.exchange.kraken.private_credentials import (
+    EphemeralKrakenCredential,
+    KrakenCredentialError,
+    load_interactive_credential,
+)
+from atp.exchange.kraken.private_transport import (
+    KRAKEN_PRIVATE_HOST,
+    KRAKEN_PRIVATE_MAX_RESPONSE_BYTES,
+    KRAKEN_PRIVATE_TIMEOUT_SECONDS,
+    KrakenApiKeyInfoRequest,
+    KrakenBalanceRequest,
+    KrakenPrivateHTTPObservation,
+    KrakenPrivateHTTPTransport,
+    KrakenPrivateTransport,
+    KrakenPrivateTransportError,
+    api_key_info_request,
+    balance_request,
 )
 from atp.exchange.kraken.public import (
     KRAKEN_PUBLIC_ROUTE_ALLOWLIST,
@@ -26,13 +44,27 @@ from atp.exchange.kraken.public import (
 __all__ = [
     "KRAKEN_PUBLIC_ROUTE_ALLOWLIST",
     "KRAKEN_PRIVATE_READ_ROUTE_ALLOWLIST",
+    "KRAKEN_PRIVATE_HOST",
+    "KRAKEN_PRIVATE_MAX_RESPONSE_BYTES",
+    "KRAKEN_PRIVATE_TIMEOUT_SECONDS",
+    "EphemeralKrakenCredential",
     "KrakenAccountWideOpenOrdersRequest",
+    "KrakenApiKeyInfoRequest",
+    "KrakenBalanceRequest",
+    "KrakenCredentialError",
+    "KrakenPrivateHTTPObservation",
+    "KrakenPrivateHTTPTransport",
+    "KrakenPrivateTransport",
+    "KrakenPrivateTransportError",
     "KrakenPrivateReadRoute",
     "KrakenPublicClient",
     "KrakenPublicHTTPTransport",
     "KrakenPublicTransport",
     "MonotonicNonceProvider",
     "account_wide_open_orders_request",
+    "api_key_info_request",
+    "balance_request",
+    "load_interactive_credential",
     "parse_api_key_info",
     "parse_balances",
     "parse_open_orders",
