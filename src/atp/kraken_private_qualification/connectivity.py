@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hmac
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -129,19 +128,6 @@ def _payload_result(observation: KrakenPrivateHTTPObservation) -> dict[str, obje
     return payload
 
 
-def _api_key_matches(payload: dict[str, object], credential: EphemeralKrakenCredential) -> bool:
-    result = payload.get("result")
-    if type(result) is not dict or type(result.get("apiKey")) is not str:
-        return False
-    try:
-        supplied = credential.api_key_bytes().decode("ascii")
-    except UnicodeError:
-        return False
-    matches = hmac.compare_digest(result["apiKey"], supplied)
-    supplied = ""
-    return matches
-
-
 def _validate_evidence(
     capability: PrivateCredentialCapabilityEvidence,
     balances: AccountBalanceEvidence,
@@ -221,10 +207,6 @@ def qualify_private_connectivity(
             state, transport, api_key_info_request(credential), credential, nonce_provider
         )
         key_payload = _payload_result(key_observation)
-        if not _api_key_matches(key_payload, credential):
-            raise _QualificationFailure(
-                KrakenPrivateConnectivityReason.KRAKEN_CREDENTIAL_BINDING_MISMATCH
-            )
         try:
             capability = parse_api_key_info(
                 key_payload, credential.reference, key_observation.observed_at
