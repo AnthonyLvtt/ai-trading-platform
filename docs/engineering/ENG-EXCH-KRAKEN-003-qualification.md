@@ -36,12 +36,13 @@ process-local per-credential nonce provider is sufficient only for this
 single-process explicit command and does not claim cross-process safety.
 
 The qualification performs exactly three sequential observations. It first
-confirms that GetApiKeyInfo identifies the supplied key and reduces its response
-to the existing least-privilege capability evidence. It then constructs the
-existing Balance evidence and the exact request-bound, account-wide OpenOrders
-evidence. Raw responses, auth headers, nonce values, key metadata, IP allowlists,
-and secrets are excluded from the result. Failures produce only fixed reason
-codes, with no retry.
+requires an authenticated GetApiKeyInfo response and reduces that response to
+the existing least-privilege capability evidence. The returned `apiKey` metadata
+is not required to be a literal echo of the locally supplied API key. It then
+constructs the existing Balance evidence and the exact request-bound,
+account-wide OpenOrders evidence. Raw responses, auth headers, nonce values, key
+metadata, IP allowlists, and secrets are excluded from the result. Failures
+produce only fixed reason codes, with no retry.
 
 A `PASSED` result requires all of the following:
 

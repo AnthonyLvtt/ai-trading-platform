@@ -171,18 +171,22 @@ def test_transport_failures_are_sanitized_and_never_retried(
     assert len(transport.calls) == result.private_network_calls == 1
 
 
-def test_api_key_response_must_bind_to_loaded_key(clean_main) -> None:
-    class Mismatch(FixtureTransport):
+def test_api_key_info_does_not_require_literal_key_echo(clean_main) -> None:
+    class NonLiteralKeyEcho(FixtureTransport):
         def post(self, request, credential, nonce_provider):
             observation = super().post(request, credential, nonce_provider)
             if request.route is KrakenPrivateReadRoute.API_KEY_INFO:
-                observation.payload["result"]["apiKey"] = "different-key"
+                observation.payload["result"]["apiKey"] = "kraken-returned-key-identifier"
             return observation
 
-    result = run(Loader(), Mismatch())
-    assert result.status is KrakenPrivateConnectivityStatus.FAILED
-    assert result.reason_code is KrakenPrivateConnectivityReason.KRAKEN_CREDENTIAL_BINDING_MISMATCH
-    assert result.private_network_calls == 1
+    result = run(Loader(), NonLiteralKeyEcho())
+    assert result.status is KrakenPrivateConnectivityStatus.PASSED
+    assert (
+        result.reason_code is KrakenPrivateConnectivityReason.KRAKEN_PRIVATE_CONNECTIVITY_QUALIFIED
+    )
+    assert result.private_network_calls == 3
+    assert result.real_economic_calls == 0
+    assert result.side_effect_performed is False
 
 
 def test_kraken_error_envelopes_are_mapped_without_retry(clean_main) -> None:
