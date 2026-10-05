@@ -36,7 +36,7 @@ def test_real_vertical_slice_produces_bound_qualifiable_evidence():
     accounting = AccountingEngine().replay(
         AccountingReplayInput(
             initial_cash=Decimal("100"),
-            currency="USDT",
+            currency="EUR",
             executions=(AccountingExecution(fill, Decimal("2")),),
         )
     )
@@ -144,7 +144,7 @@ def test_real_slice_valuation_identity_rejects_tampering():
     accounting = AccountingEngine().replay(
         AccountingReplayInput(
             initial_cash=Decimal("100"),
-            currency="USDT",
+            currency="EUR",
             executions=(AccountingExecution(fill, Decimal("2")),),
         )
     )
