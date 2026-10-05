@@ -245,7 +245,6 @@ class ExecutionLedger:
         self._append(
             intent.idempotency_key,
             SubmissionState.PREPARED,
-            None,
             "INTENT_VALIDATED",
         )
 
@@ -259,33 +258,57 @@ class ExecutionLedger:
         if type(intent) is not OrderIntent:
             raise ExecutionError("EXECUTION_INTENT_INVALID")
         intent.validate()
-        if not re.fullmatch(r"[A-Z0-9_]{3,80}", reason_code):
+        if type(target) is not SubmissionState:
+            raise ExecutionError("LEDGER_INPUT_INVALID")
+        if type(reason_code) is not str or not re.fullmatch(r"[A-Z0-9_]{3,80}", reason_code):
             raise ExecutionError("LEDGER_REASON_INVALID")
-        current = self.current_state(intent.idempotency_key)
-        if current is None or target not in _ALLOWED_TRANSITIONS[current]:
-            raise ExecutionError("LEDGER_TRANSITION_INVALID")
-        self._append(intent.idempotency_key, target, current, reason_code)
+        self._append(intent.idempotency_key, target, reason_code)
 
     def current_state(self, key: ContentIdentity) -> SubmissionState | None:
         if type(key) is not ContentIdentity:
             raise ExecutionError("LEDGER_KEY_INVALID")
         self.initialize()
-        query = (
-            "SELECT state FROM execution_transitions "
-            "WHERE idempotency_key = ? ORDER BY sequence DESC LIMIT 1"
-        )
         with sqlite3.connect(self._path) as db:
-            row = db.execute(query, (str(key),)).fetchone()
-        return None if row is None else SubmissionState(row[0])
+            return self._read_validated_state(db, key)
+
+    @staticmethod
+    def _read_validated_state(
+        db: sqlite3.Connection, key: ContentIdentity
+    ) -> SubmissionState | None:
+        rows = db.execute(
+            "SELECT state, previous_state, reason_code FROM execution_transitions "
+            "WHERE idempotency_key = ? ORDER BY sequence",
+            (str(key),),
+        ).fetchall()
+        current: SubmissionState | None = None
+        for state_text, previous_text, reason_code in rows:
+            try:
+                state = SubmissionState(state_text)
+            except ValueError:
+                raise ExecutionError("LEDGER_HISTORY_INVALID") from None
+            if (
+                (current is None and state is not SubmissionState.PREPARED)
+                or (current is not None and state not in _ALLOWED_TRANSITIONS[current])
+                or previous_text != (None if current is None else current.value)
+                or type(reason_code) is not str
+                or not re.fullmatch(r"[A-Z0-9_]{3,80}", reason_code)
+            ):
+                raise ExecutionError("LEDGER_HISTORY_INVALID")
+            current = state
+        return current
 
     def _append(
         self,
         key: ContentIdentity,
         state: SubmissionState,
-        previous: SubmissionState | None,
         reason_code: str,
     ) -> None:
-        if type(key) is not ContentIdentity or type(state) is not SubmissionState:
+        if (
+            type(key) is not ContentIdentity
+            or type(state) is not SubmissionState
+            or type(reason_code) is not str
+            or not re.fullmatch(r"[A-Z0-9_]{3,80}", reason_code)
+        ):
             raise ExecutionError("LEDGER_INPUT_INVALID")
         self.initialize()
         query = (
@@ -293,16 +316,25 @@ class ExecutionLedger:
             "(idempotency_key, state, previous_state, reason_code) "
             "VALUES (?, ?, ?, ?)"
         )
-        values = (
-            str(key),
-            state.value,
-            None if previous is None else previous.value,
-            reason_code,
-        )
         try:
             with sqlite3.connect(self._path) as db:
+                # A write lock covers both the state decision and its append.
                 db.execute("BEGIN IMMEDIATE")
-                db.execute(query, values)
+                previous = self._read_validated_state(db, key)
+                if state is SubmissionState.PREPARED:
+                    if previous is not None:
+                        raise ExecutionError("IDEMPOTENCY_KEY_ALREADY_RECORDED")
+                elif previous is None or state not in _ALLOWED_TRANSITIONS[previous]:
+                    raise ExecutionError("LEDGER_TRANSITION_INVALID")
+                db.execute(
+                    query,
+                    (
+                        str(key),
+                        state.value,
+                        None if previous is None else previous.value,
+                        reason_code,
+                    ),
+                )
                 db.commit()
         except sqlite3.IntegrityError:
             raise ExecutionError("IDEMPOTENCY_KEY_ALREADY_RECORDED") from None
