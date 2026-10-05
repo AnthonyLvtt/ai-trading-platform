@@ -187,7 +187,7 @@ def test_correct_strategy_fields_with_wrong_value_types_are_blocked(
 @pytest.mark.parametrize(
     "payload",
     [
-        {"side": 42, "symbol": "BTCUSDT"},
+        {"side": 42, "symbol": "BTC/EUR"},
         {"side": "BUY_ENTRY", "symbol": True},
     ],
 )
