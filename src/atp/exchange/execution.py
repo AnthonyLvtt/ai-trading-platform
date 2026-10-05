@@ -41,7 +41,7 @@ class SubmissionState(StrEnum):
     RECONCILED = "RECONCILED"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class OrderIntent:
     venue: VenueId
     instrument: CanonicalInstrumentId
@@ -81,18 +81,27 @@ class OrderIntent:
             "strategy_signal_identity": str(signal.content_identity),
             "venue": VenueId.KRAKEN.value,
         }
-        return cls(
-            venue=VenueId.KRAKEN,
-            instrument=instrument,
-            side=side,
-            order_type=order_type,
-            quantity=quantity,
-            limit_price=limit_price,
-            strategy_evaluation_identity=strategy_evaluation.content_identity,
-            strategy_signal_identity=signal.content_identity,
-            risk_decision_identity=risk_decision.content_identity,
-            idempotency_key=ContentIdentity.from_canonical(value),
+        intent = object.__new__(cls)
+        object.__setattr__(intent, "venue", VenueId.KRAKEN)
+        object.__setattr__(intent, "instrument", instrument)
+        object.__setattr__(intent, "side", side)
+        object.__setattr__(intent, "order_type", order_type)
+        object.__setattr__(intent, "quantity", quantity)
+        object.__setattr__(intent, "limit_price", limit_price)
+        object.__setattr__(
+            intent,
+            "strategy_evaluation_identity",
+            strategy_evaluation.content_identity,
         )
+        object.__setattr__(intent, "strategy_signal_identity", signal.content_identity)
+        object.__setattr__(intent, "risk_decision_identity", risk_decision.content_identity)
+        object.__setattr__(
+            intent,
+            "idempotency_key",
+            ContentIdentity.from_canonical(value),
+        )
+        intent.__post_init__()
+        return intent
 
     def __post_init__(self) -> None:
         _validate_order_fields(
@@ -112,6 +121,24 @@ class OrderIntent:
             raise ExecutionError("EXECUTION_INTENT_INVALID")
         if any(type(value) is not ContentIdentity for value in identities):
             raise ExecutionError("EXECUTION_INTENT_INVALID")
+        expected = ContentIdentity.from_canonical(
+            {
+                "instrument": self.instrument.symbol,
+                "limit_price": None if self.limit_price is None else str(self.limit_price),
+                "order_type": self.order_type.value,
+                "quantity": str(self.quantity),
+                "risk_decision_identity": str(self.risk_decision_identity),
+                "side": self.side.value,
+                "strategy_evaluation_identity": str(self.strategy_evaluation_identity),
+                "strategy_signal_identity": str(self.strategy_signal_identity),
+                "venue": self.venue.value,
+            }
+        )
+        if self.idempotency_key != expected:
+            raise ExecutionError("EXECUTION_INTENT_INVALID")
+
+    def validate(self) -> None:
+        self.__post_init__()
 
 
 def _validate_binding(
@@ -212,6 +239,9 @@ class ExecutionLedger:
             db.commit()
 
     def prepare(self, intent: OrderIntent) -> None:
+        if type(intent) is not OrderIntent:
+            raise ExecutionError("EXECUTION_INTENT_INVALID")
+        intent.validate()
         self._append(
             intent.idempotency_key,
             SubmissionState.PREPARED,
@@ -226,6 +256,9 @@ class ExecutionLedger:
         *,
         reason_code: str,
     ) -> None:
+        if type(intent) is not OrderIntent:
+            raise ExecutionError("EXECUTION_INTENT_INVALID")
+        intent.validate()
         if not re.fullmatch(r"[A-Z0-9_]{3,80}", reason_code):
             raise ExecutionError("LEDGER_REASON_INVALID")
         current = self.current_state(intent.idempotency_key)
