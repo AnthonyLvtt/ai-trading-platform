@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import ast
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -223,3 +226,92 @@ def test_tampered_intent_is_rejected_at_consumption_boundary() -> None:
     )
     with pytest.raises(ExecutionError, match="EXECUTION_INTENT_INVALID"):
         DisabledKrakenEconomicTransport().submit(intent)
+
+
+def _order_intent() -> OrderIntent:
+    evaluation, decision = approved(SignalKind.LONG_ENTRY)
+    return OrderIntent.create(
+        strategy_evaluation=evaluation,
+        risk_decision=decision,
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.001"),
+    )
+
+
+def test_competing_outcomes_cannot_both_commit(tmp_path: Path) -> None:
+    intent = _order_intent()
+    read_barrier = Barrier(2)
+
+    class RacingLedger(ExecutionLedger):
+        def current_state(self, key: ContentIdentity) -> SubmissionState | None:
+            state = super().current_state(key)
+            if state is SubmissionState.ATTEMPT_STARTED:
+                read_barrier.wait(timeout=5)
+            return state
+
+    ledger = RacingLedger(tmp_path / "execution.sqlite")
+    ledger.prepare(intent)
+    ledger.transition(intent, SubmissionState.ATTEMPT_STARTED, reason_code="ATTEMPT_RESERVED")
+    start = Barrier(2)
+
+    def record(target: SubmissionState) -> str:
+        start.wait(timeout=5)
+        try:
+            ledger.transition(intent, target, reason_code="OBSERVED_OUTCOME")
+        except ExecutionError as error:
+            return str(error)
+        return "COMMITTED"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(record, SubmissionState.ACKNOWLEDGED)
+        second = pool.submit(record, SubmissionState.UNKNOWN)
+        assert sorted((first.result(timeout=10), second.result(timeout=10))) == [
+            "COMMITTED",
+            "LEDGER_TRANSITION_INVALID",
+        ]
+    assert ExecutionLedger(tmp_path / "execution.sqlite").current_state(intent.idempotency_key) in {
+        SubmissionState.ACKNOWLEDGED,
+        SubmissionState.UNKNOWN,
+    }
+
+
+@pytest.mark.parametrize(
+    ("state", "previous"),
+    [
+        ("ACKNOWLEDGED", "PREPARED"),
+        ("UNKNOWN", "ATTEMPT_STARTED"),
+        ("INVALID", "ACKNOWLEDGED"),
+    ],
+)
+def test_tampered_or_divergent_history_fails_closed(
+    tmp_path: Path, state: str, previous: str
+) -> None:
+    intent = _order_intent()
+    path = tmp_path / "execution.sqlite"
+    ledger = ExecutionLedger(path)
+    ledger.prepare(intent)
+    ledger.transition(intent, SubmissionState.ATTEMPT_STARTED, reason_code="ATTEMPT_RESERVED")
+    if state == "UNKNOWN":
+        ledger.transition(intent, SubmissionState.ACKNOWLEDGED, reason_code="OBSERVED_OUTCOME")
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "INSERT INTO execution_transitions "
+            "(idempotency_key, state, previous_state, reason_code) VALUES (?, ?, ?, ?)",
+            (str(intent.idempotency_key), state, previous, "INJECTED_ROW"),
+        )
+    with pytest.raises(ExecutionError, match="LEDGER_HISTORY_INVALID"):
+        ledger.current_state(intent.idempotency_key)
+    with pytest.raises(ExecutionError, match="LEDGER_HISTORY_INVALID"):
+        ledger.transition(intent, SubmissionState.RECONCILED, reason_code="READ_ONLY_RECONCILED")
+
+
+def test_invalid_transition_target_and_reason_fail_closed(tmp_path: Path) -> None:
+    intent = _order_intent()
+    ledger = ExecutionLedger(tmp_path / "execution.sqlite")
+    ledger.prepare(intent)
+    with pytest.raises(ExecutionError, match="LEDGER_INPUT_INVALID"):
+        ledger.transition(intent, "ATTEMPT_STARTED", reason_code="ATTEMPT_RESERVED")  # type: ignore[arg-type]
+    with pytest.raises(ExecutionError, match="LEDGER_REASON_INVALID"):
+        ledger.transition(intent, SubmissionState.ATTEMPT_STARTED, reason_code=None)  # type: ignore[arg-type]
+    assert ledger.current_state(intent.idempotency_key) is SubmissionState.PREPARED
