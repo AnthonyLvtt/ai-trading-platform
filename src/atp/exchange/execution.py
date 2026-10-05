@@ -150,9 +150,7 @@ def _validate_order_fields(
         and instrument == BTC_EUR
         and instrument.market is MarketKind.SPOT
     )
-    quantity_valid = (
-        type(quantity) is Decimal and quantity.is_finite() and quantity > Decimal(0)
-    )
+    quantity_valid = type(quantity) is Decimal and quantity.is_finite() and quantity > Decimal(0)
     if not instrument_valid:
         raise ExecutionError("ORDER_FIELDS_INVALID")
     if type(side) is not OrderSide or type(order_type) is not OrderType:
