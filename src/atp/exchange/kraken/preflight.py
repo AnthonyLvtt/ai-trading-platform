@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from atp.exchange.contracts import (
     PublicInstrumentMetadata,
@@ -97,25 +97,96 @@ class KrakenOrderPreflight:
         return result
 
     def validate(self) -> None:
-        if not re.fullmatch(r"atp-[0-9a-f]{14}", self.client_order_id):
+        """Check structure and content integrity, without granting execution authority."""
+        identities: tuple[ContentIdentity, ...] = (
+            self.intent_identity,
+            self.mapping_identity,
+            self.metadata_identity,
+            self.content_identity,
+        )
+        if self.price_evidence_identity is not None:
+            identities += (self.price_evidence_identity,)
+        if any(
+            type(value) is not ContentIdentity
+            or value.algorithm != "sha256"
+            or type(value.digest) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", value.digest) is None
+            for value in identities
+        ):
             raise ExecutionError("KRAKEN_PREFLIGHT_INVALID")
-        if len(self.payload) not in {5, 6}:
+        if (
+            type(self.client_order_id) is not str
+            or self.client_order_id != f"atp-{self.intent_identity.digest[:14]}"
+            or type(self.payload) is not tuple
+            or any(
+                type(item) is not tuple
+                or len(item) != 2
+                or any(type(part) is not str for part in item)
+                for item in self.payload
+            )
+        ):
             raise ExecutionError("KRAKEN_PREFLIGHT_INVALID")
         keys = tuple(key for key, _ in self.payload)
-        required = {"cl_ord_id", "ordertype", "pair", "type", "volume"}
-        if not required.issubset(keys) or len(keys) != len(set(keys)):
-            raise ExecutionError("KRAKEN_PREFLIGHT_INVALID")
         values = dict(self.payload)
-        if values["cl_ord_id"] != self.client_order_id:
+        required = {"cl_ord_id", "ordertype", "pair", "type", "volume"}
+        if values.get("ordertype") == "limit":
+            required.add("price")
+        if (
+            set(keys) != required
+            or len(keys) != len(set(keys))
+            or self.payload != tuple(sorted(self.payload))
+            or values.get("cl_ord_id") != self.client_order_id
+            or values.get("ordertype") not in {"market", "limit"}
+            or values.get("type") not in {"buy", "sell"}
+            or not values.get("pair")
+            or (values.get("ordertype") == "market" and self.price_evidence_identity is None)
+        ):
             raise ExecutionError("KRAKEN_PREFLIGHT_INVALID")
-        if values["ordertype"] not in {"market", "limit"}:
+        for key in ("volume", "price"):
+            if key not in values:
+                continue
+            try:
+                number = Decimal(values[key])
+            except InvalidOperation:
+                raise ExecutionError("KRAKEN_PREFLIGHT_INVALID") from None
+            if not number.is_finite() or number <= 0 or _decimal_text(number) != values[key]:
+                raise ExecutionError("KRAKEN_PREFLIGHT_INVALID")
+        expected = ContentIdentity.from_canonical(
+            {
+                "client_order_id": self.client_order_id,
+                "intent_identity": str(self.intent_identity),
+                "mapping_identity": str(self.mapping_identity),
+                "metadata_identity": str(self.metadata_identity),
+                "payload": self.payload,
+                "price_evidence_identity": (
+                    None
+                    if self.price_evidence_identity is None
+                    else str(self.price_evidence_identity)
+                ),
+            }
+        )
+        if self.content_identity != expected:
             raise ExecutionError("KRAKEN_PREFLIGHT_INVALID")
-        if values["type"] not in {"buy", "sell"}:
-            raise ExecutionError("KRAKEN_PREFLIGHT_INVALID")
-        if values["ordertype"] == "limit" and "price" not in values:
-            raise ExecutionError("KRAKEN_PREFLIGHT_INVALID")
-        if values["ordertype"] == "market" and "price" in values:
-            raise ExecutionError("KRAKEN_PREFLIGHT_INVALID")
+
+    def validate_against(
+        self,
+        *,
+        intent: OrderIntent,
+        mapping: VenueInstrumentMappingEvidence,
+        metadata: PublicInstrumentMetadata,
+        market_price: PublicPriceEvidence | None = None,
+    ) -> None:
+        """Rebuild against caller-supplied evidence; a digest alone is not authority.
+
+        Freshness retains the supplied evidence's observation semantics. This method
+        does not certify present-time freshness or authorize economic submission.
+        """
+        self.validate()
+        expected = KrakenOrderPreflight.build(
+            intent=intent, mapping=mapping, metadata=metadata, market_price=market_price
+        )
+        if self != expected:
+            raise ExecutionError("KRAKEN_PREFLIGHT_BINDING_INVALID")
 
 
 def _validate_evidence(
