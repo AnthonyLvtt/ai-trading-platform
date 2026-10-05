@@ -20,7 +20,6 @@ from atp.ops.model import (
     OperationalReasonCode as Reason,
 )
 from atp.shared.errors import ValidationError
-from atp.testnet_activation.contracts import inspect_context_reference
 
 
 def validate_health_result(status: object, evidence: object) -> bool:
@@ -130,22 +129,8 @@ def validate_readiness_result(value: object) -> bool:
         activation_check = checks[StartupCheck.TESTNET_ACTIVATION_AUTHORIZED]
         if activation_check.evidence_identity != value.runtime_authorization_identity:
             return False
-        if (
-            value.environment is OperationalEnvironment.TESTNET
-            and value.readiness_status is ReadinessStatus.READY
-            and value.runtime_authorization_identity is None
-        ):
+        if value.environment is OperationalEnvironment.TESTNET and value.readiness_status is ReadinessStatus.READY:
             return False
-        if (
-            value.environment is OperationalEnvironment.TESTNET
-            and value.readiness_status is ReadinessStatus.READY
-        ):
-            context = inspect_context_reference(value.runtime_authorization_identity)
-            if (
-                context is None
-                or context.qualification_identity != value.qualification_result_identity
-            ):
-                return False
         if value.config is not None:
             config = value.config
             if type(config) is not OperationalConfig or config.environment is not value.environment:
