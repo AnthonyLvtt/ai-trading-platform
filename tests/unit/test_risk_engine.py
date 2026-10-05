@@ -49,7 +49,7 @@ def strategy_evaluation(kind: SignalKind = SignalKind.LONG_ENTRY) -> StrategyEva
         strategy_version="1.0.0",
         configuration=SmaCrossoverConfig(short_window=2, long_window=3),
         environment=Environment.BACKTEST,
-        dataset_id=DatasetId("btc-usdt-1m:v1"),
+        dataset_id=DatasetId("btc-eur-1m:v1"),
         snapshot_id=SnapshotId("snapshot:risk-fixture:v1"),
         snapshot_content_identity=ContentIdentity.from_text("snapshot"),
         schema_version="candle-v1",
@@ -58,7 +58,7 @@ def strategy_evaluation(kind: SignalKind = SignalKind.LONG_ENTRY) -> StrategyEva
         universe_snapshot_id=UniverseSnapshotId("universe:risk-fixture:v1"),
         universe_content_identity=ContentIdentity.from_text("universe"),
         evaluation_time=LogicalTime(NOW),
-        symbol="BTCUSDT",
+        symbol="BTC/EUR",
         used_data=(),
     )
     return StrategyEvaluation.completed(provenance, kind)
@@ -76,7 +76,7 @@ def market_context(**changes: object) -> RiskMarketContext:
         "margin_enabled": False,
         "market_type": MarketType.SPOT,
         "position_direction": PositionDirection.LONG,
-        "symbol": "BTCUSDT",
+        "symbol": "BTC/EUR",
     }
     values.update(changes)
     return RiskMarketContext(**values)  # type: ignore[arg-type]
@@ -88,7 +88,7 @@ def empty_portfolio() -> PortfolioState:
 
 def open_position(
     *,
-    symbol: str = "BTCUSDT",
+    symbol: str = "BTC/EUR",
     position_id: str = "position-1",
     side: PositionSide = PositionSide.LONG,
 ) -> OpenPosition:
@@ -156,7 +156,7 @@ def test_long_entry_with_known_empty_portfolio_is_approved() -> None:
     assert result.risk_decision_id is not None
 
 
-@pytest.mark.parametrize("symbol", ["BTCUSDT", "ETHUSDT"])
+@pytest.mark.parametrize("symbol", ["BTC/EUR", "ETH/EUR"])
 def test_long_entry_with_any_open_position_is_rejected(symbol: str) -> None:
     result = DeterministicRiskEngine(policy()).evaluate(
         context(portfolio=open_portfolio(open_position(symbol=symbol)))
@@ -190,7 +190,7 @@ def test_no_action_has_explicit_non_economic_result() -> None:
             RiskReasonCode.NO_OPEN_POSITION,
         ),
         (
-            open_portfolio(open_position(symbol="ETHUSDT")),
+            open_portfolio(open_position(symbol="ETH/EUR")),
             RiskStatus.REJECTED,
             RiskReasonCode.POSITION_SYMBOL_MISMATCH,
         ),
@@ -289,14 +289,14 @@ def test_strategy_and_market_environment_mismatch_is_blocked() -> None:
 
 def test_strategy_and_market_symbol_mismatch_is_blocked() -> None:
     result = DeterministicRiskEngine(policy()).evaluate(
-        context(market=market_context(symbol="ETHUSDT"))
+        context(market=market_context(symbol="ETH/EUR"))
     )
 
     assert result.status is RiskStatus.BLOCKED
     assert result.reason_code is RiskReasonCode.MARKET_SYMBOL_MISMATCH
     assert result.provenance.market_context is not None
-    assert result.provenance.market_context.symbol == "ETHUSDT"
-    assert market_context(symbol="ETHUSDT").content_identity != market_context().content_identity
+    assert result.provenance.market_context.symbol == "ETH/EUR"
+    assert market_context(symbol="ETH/EUR").content_identity != market_context().content_identity
 
 
 @pytest.mark.parametrize(
@@ -427,7 +427,7 @@ def test_malformed_top_level_runtime_evidence_is_blocked() -> None:
     engine = DeterministicRiskEngine(policy())
     malformed_market = RiskEvaluationContext(
         strategy_evaluation=strategy_evaluation(),
-        market_context={"symbol": "BTCUSDT"},  # type: ignore[arg-type]
+        market_context={"symbol": "BTC/EUR"},  # type: ignore[arg-type]
         portfolio_state=empty_portfolio(),
     )
     malformed_strategy = RiskEvaluationContext(
@@ -503,7 +503,7 @@ def test_policy_or_portfolio_change_changes_risk_identity() -> None:
 
 def test_portfolio_identity_is_independent_of_input_collection_order() -> None:
     first = open_position(position_id="position-1")
-    second = open_position(position_id="position-2", symbol="ETHUSDT")
+    second = open_position(position_id="position-2", symbol="ETH/EUR")
 
     assert (
         open_portfolio(first, second).content_identity
