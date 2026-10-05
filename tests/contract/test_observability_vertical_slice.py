@@ -108,7 +108,7 @@ def _completed_backtest(
         universe_snapshot_id=UniverseSnapshotId("universe:late-created-observability:v1"),
         created_at=start,
         effective_at=start,
-        rules_version="spot-usdt-v1",
+        rules_version="spot-eur-v1",
         source_snapshot_ids=(snapshot.snapshot_id,),
         decisions=(SymbolDecision("BTC/EUR", True, "eligible fixture", start),),
     )
@@ -192,7 +192,7 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
         universe_snapshot_id=UniverseSnapshotId("universe:observability-contract:v1"),
         created_at=start,
         effective_at=start,
-        rules_version="spot-usdt-v1",
+        rules_version="spot-eur-v1",
         source_snapshot_ids=(snapshot.snapshot_id,),
         decisions=(SymbolDecision("BTC/EUR", True, "eligible fixture", start),),
     )
@@ -239,7 +239,7 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
     assert order is not None and fill is not None
     accounting_input = AccountingReplayInput(
         initial_cash=Decimal("100"),
-        currency="USDT",
+        currency="EUR",
         executions=(AccountingExecution(fill, Decimal("2")),),
     )
     accounting = AccountingEngine().replay(accounting_input)
