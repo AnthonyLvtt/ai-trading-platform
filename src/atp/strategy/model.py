@@ -74,15 +74,7 @@ class StrategyEvaluationContext:
     candle_interval: str | None = None
 
     def __post_init__(self) -> None:
-        if self.environment is Environment.TESTNET:
-            from atp.testnet_activation.contracts import context_error
-
-            if context_error(
-                self.runtime_authorization, self.evaluation_time.value, symbol=self.symbol
-            ):
-                raise ValidationError("TESTNET Strategy authorization invalid")
-        else:
-            require_active_environment(self.environment)
+        require_active_environment(self.environment)
         if not self.symbol or self.symbol.strip() != self.symbol:
             raise ValidationError("Strategy evaluation symbol must be non-empty and trimmed")
 
