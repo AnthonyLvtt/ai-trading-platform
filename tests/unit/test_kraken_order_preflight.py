@@ -381,3 +381,56 @@ def test_revalidation_rejects_different_intent_and_price_evidence() -> None:
             metadata=metadata,
             market_price=replace(price, price=price.price + Decimal("1")),
         )
+
+
+@pytest.mark.parametrize(
+    ("tamper", "reason"),
+    [
+        ("mapping_pair", "KRAKEN_MAPPING_NOT_AUTHORIZED"),
+        ("mapping_aliases", "KRAKEN_MAPPING_NOT_AUTHORIZED"),
+        ("metadata_minimum", "KRAKEN_METADATA_NOT_AUTHORIZED"),
+        ("metadata_increment", "KRAKEN_METADATA_NOT_AUTHORIZED"),
+        ("price_value", "KRAKEN_PRICE_EVIDENCE_INVALID"),
+        ("price_observation", "KRAKEN_PRICE_EVIDENCE_INVALID"),
+    ],
+)
+def test_preflight_rechecks_consumed_evidence_integrity(tamper: str, reason: str) -> None:
+    mapping, metadata, price = evidence()
+    order = intent(order_type=OrderType.MARKET)
+    result = KrakenOrderPreflight.build(
+        intent=order, mapping=mapping, metadata=metadata, market_price=price
+    )
+
+    if tamper == "mapping_pair":
+        object.__setattr__(mapping, "native_identifier", "XETHZEUR")
+    elif tamper == "mapping_aliases":
+        object.__setattr__(mapping, "native_aliases", ("XETHZEUR",))
+    elif tamper == "metadata_minimum":
+        object.__setattr__(metadata, "minimum_notional", Decimal("0.01"))
+    elif tamper == "metadata_increment":
+        object.__setattr__(metadata, "quantity_increment", Decimal("0.00000002"))
+    elif tamper == "price_value":
+        object.__setattr__(price, "price", price.price * 2)
+    else:
+        assert price.observation is not None
+        object.__setattr__(price.observation, "request_started_at", AT - timedelta(seconds=2))
+
+    with pytest.raises(ExecutionError, match=reason):
+        KrakenOrderPreflight.build(
+            intent=order, mapping=mapping, metadata=metadata, market_price=price
+        )
+    with pytest.raises(ExecutionError, match=reason):
+        result.validate_against(
+            intent=order, mapping=mapping, metadata=metadata, market_price=price
+        )
+
+
+def test_limit_preflight_rejects_tampered_metadata_without_market_price() -> None:
+    mapping, metadata, _ = evidence()
+    order = intent()
+    result = KrakenOrderPreflight.build(intent=order, mapping=mapping, metadata=metadata)
+    object.__setattr__(metadata, "minimum_quantity", Decimal("0.00001"))
+    with pytest.raises(ExecutionError, match="KRAKEN_METADATA_NOT_AUTHORIZED"):
+        KrakenOrderPreflight.build(intent=order, mapping=mapping, metadata=metadata)
+    with pytest.raises(ExecutionError, match="KRAKEN_METADATA_NOT_AUTHORIZED"):
+        result.validate_against(intent=order, mapping=mapping, metadata=metadata)
