@@ -9,8 +9,6 @@ from atp.shared.errors import ConfigurationError
 
 LIVE_CREDENTIAL_ENV_KEYS = frozenset(
     {
-        "BINANCE_LIVE_API_KEY",
-        "BINANCE_LIVE_API_SECRET",
         "ATP_LIVE_API_KEY",
         "ATP_LIVE_API_SECRET",
     }
