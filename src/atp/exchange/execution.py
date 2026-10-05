@@ -15,7 +15,6 @@ from pathlib import Path
 
 from atp.exchange.contracts import BTC_EUR, CanonicalInstrumentId, MarketKind, VenueId
 from atp.risk.model import RiskDecision, RiskStatus
-from atp.shared.errors import ValidationError
 from atp.shared.identity import ContentIdentity
 from atp.strategy.model import SignalKind, StrategyEvaluation
 
@@ -125,9 +124,7 @@ def _validate_binding(
         != strategy_evaluation.signal.content_identity
     ):
         raise ExecutionError("RISK_BINDING_INVALID")
-    expected = (
-        SignalKind.LONG_ENTRY if side is OrderSide.BUY else SignalKind.EXIT
-    )
+    expected = SignalKind.LONG_ENTRY if side is OrderSide.BUY else SignalKind.EXIT
     if strategy_evaluation.signal.kind is not expected:
         raise ExecutionError("STRATEGY_SIDE_MISMATCH")
     if strategy_evaluation.provenance.symbol != BTC_EUR.symbol:
@@ -182,7 +179,7 @@ class ExecutionLedger:
     __slots__ = ("_path",)
 
     def __init__(self, path: Path) -> None:
-        if type(path) is not Path or path.exists() and path.is_symlink():
+        if type(path) is not Path or (path.exists() and path.is_symlink()):
             raise ExecutionError("LEDGER_PATH_INVALID")
         self._path = path
 
