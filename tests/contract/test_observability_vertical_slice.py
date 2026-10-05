@@ -74,7 +74,7 @@ def _completed_backtest(
     start = datetime(2026, 1, 1, tzinfo=UTC)
     points = tuple(
         DataPoint.from_value(
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
             value={"close": close, "open": open_price},
             temporal=TemporalMetadata(
                 event_time=start + timedelta(minutes=index),
@@ -89,7 +89,7 @@ def _completed_backtest(
         )
     )
     snapshot = DatasetSnapshot.create(
-        dataset_id=DatasetId("btc-usdt-1m:v1"),
+        dataset_id=DatasetId("btc-eur-1m:v1"),
         snapshot_id=SnapshotId("snapshot:late-created-observability:v1"),
         source_id=SourceId("historical-observability-fixture"),
         environment=Environment.BACKTEST,
@@ -110,7 +110,7 @@ def _completed_backtest(
         effective_at=start,
         rules_version="spot-usdt-v1",
         source_snapshot_ids=(snapshot.snapshot_id,),
-        decisions=(SymbolDecision("BTCUSDT", True, "eligible fixture", start),),
+        decisions=(SymbolDecision("BTC/EUR", True, "eligible fixture", start),),
     )
     strategy = SmaCrossoverStrategy(
         strategy_id=StrategyId("sma-crossover"),
@@ -122,7 +122,7 @@ def _completed_backtest(
             snapshot=snapshot,
             universe=universe,
             evaluation_time=LogicalTime(start + timedelta(minutes=3)),
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
         )
     )
     risk = DeterministicRiskEngine(
@@ -131,7 +131,7 @@ def _completed_backtest(
         RiskEvaluationContext(
             strategy_evaluation=strategy,
             market_context=RiskMarketContext(
-                symbol="BTCUSDT",
+                symbol="BTC/EUR",
                 market_type=MarketType.SPOT,
                 position_direction=PositionDirection.LONG,
                 margin_enabled=False,
@@ -158,7 +158,7 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
     start = datetime(2026, 1, 1, tzinfo=UTC)
     points = tuple(
         DataPoint.from_value(
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
             value={"close": close, "open": open_price},
             temporal=TemporalMetadata(
                 event_time=start + timedelta(minutes=index),
@@ -173,7 +173,7 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
         )
     )
     snapshot = DatasetSnapshot.create(
-        dataset_id=DatasetId("btc-usdt-1m:v1"),
+        dataset_id=DatasetId("btc-eur-1m:v1"),
         snapshot_id=SnapshotId("snapshot:observability-contract:v1"),
         source_id=SourceId("historical-observability-fixture"),
         environment=Environment.BACKTEST,
@@ -194,7 +194,7 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
         effective_at=start,
         rules_version="spot-usdt-v1",
         source_snapshot_ids=(snapshot.snapshot_id,),
-        decisions=(SymbolDecision("BTCUSDT", True, "eligible fixture", start),),
+        decisions=(SymbolDecision("BTC/EUR", True, "eligible fixture", start),),
     )
     evaluation_time = start + timedelta(minutes=3)
     strategy_engine = SmaCrossoverStrategy(
@@ -208,7 +208,7 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
             snapshot=snapshot,
             universe=universe,
             evaluation_time=LogicalTime(evaluation_time),
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
         )
     )
     risk = DeterministicRiskEngine(
@@ -217,7 +217,7 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
         RiskEvaluationContext(
             strategy_evaluation=strategy,
             market_context=RiskMarketContext(
-                symbol="BTCUSDT",
+                symbol="BTC/EUR",
                 market_type=MarketType.SPOT,
                 position_direction=PositionDirection.LONG,
                 margin_enabled=False,
@@ -331,7 +331,7 @@ def test_full_vertical_slice_produces_a_verifiable_audit_chain() -> None:
             snapshot=snapshot,
             universe=universe,
             evaluation_time=LogicalTime(start + timedelta(minutes=2)),
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
         )
     )
     forged_time = observe_risk(
