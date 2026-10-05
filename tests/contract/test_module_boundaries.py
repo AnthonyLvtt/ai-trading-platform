@@ -85,7 +85,6 @@ MODULES = [
     "atp.exchange",
     "atp.exchange.contracts",
     "atp.exchange.private_contracts",
-    "atp.exchange.binance_compat",
     "atp.exchange.kraken",
     "atp.exchange.kraken.public",
     "atp.exchange.kraken.private",
