@@ -7,7 +7,7 @@ format:
 	uv run ruff format src tests
 
 format-check:
-	uv run ruff format --check --diff src tests
+	uv run ruff format --check src tests
 
 lint:
 	uv run ruff check src tests
