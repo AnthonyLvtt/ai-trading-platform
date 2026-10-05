@@ -14,7 +14,7 @@ from atp.data.snapshot import (
     FreshnessStatus,
     GapStatus,
 )
-from atp.shared.environment import ACTIVE_ENVIRONMENTS, Environment
+from atp.shared.environment import ACTIVE_ENVIRONMENTS
 from atp.shared.errors import DomainError, ValidationError
 from atp.strategy.identity import StrategyId
 from atp.strategy.model import (
