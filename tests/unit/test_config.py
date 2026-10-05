@@ -24,4 +24,4 @@ def test_invalid_configuration_refused() -> None:
 
 def test_live_credentials_forbidden_in_standard_tests() -> None:
     with pytest.raises(ConfigurationError):
-        AppConfig.from_env({"ATP_ENV": "TEST", "BINANCE_LIVE_API_KEY": "secret"})
+        AppConfig.from_env({"ATP_ENV": "TEST", "ATP_LIVE_API_KEY": "secret"})
