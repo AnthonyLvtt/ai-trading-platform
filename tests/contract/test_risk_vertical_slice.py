@@ -50,7 +50,7 @@ def test_data_to_strategy_to_risk_decision_vertical_slice() -> None:
     start = datetime(2026, 1, 1, tzinfo=UTC)
     points = tuple(
         DataPoint.from_value(
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
             value={"close": close},
             temporal=TemporalMetadata(
                 event_time=start + timedelta(minutes=index),
@@ -63,7 +63,7 @@ def test_data_to_strategy_to_risk_decision_vertical_slice() -> None:
         for index, close in enumerate(("3", "2", "1", "4"))
     )
     data = DatasetSnapshot.create(
-        dataset_id=DatasetId("btc-usdt-1m:v1"),
+        dataset_id=DatasetId("btc-eur-1m:v1"),
         snapshot_id=SnapshotId("snapshot:risk-contract:v1"),
         source_id=SourceId("historical-risk-fixture"),
         environment=Environment.BACKTEST,
@@ -84,7 +84,7 @@ def test_data_to_strategy_to_risk_decision_vertical_slice() -> None:
         effective_at=start,
         rules_version="spot-usdt-v1",
         source_snapshot_ids=(data.snapshot_id,),
-        decisions=(SymbolDecision("BTCUSDT", True, "eligible fixture", start),),
+        decisions=(SymbolDecision("BTC/EUR", True, "eligible fixture", start),),
     )
     strategy = SmaCrossoverStrategy(
         strategy_id=StrategyId("sma-crossover"),
@@ -97,7 +97,7 @@ def test_data_to_strategy_to_risk_decision_vertical_slice() -> None:
             snapshot=data,
             universe=universe,
             evaluation_time=LogicalTime(start + timedelta(minutes=3)),
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
         )
     )
     assert strategy_result.signal is not None
@@ -105,7 +105,7 @@ def test_data_to_strategy_to_risk_decision_vertical_slice() -> None:
     risk_context = RiskEvaluationContext(
         strategy_evaluation=strategy_result,
         market_context=RiskMarketContext(
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
             market_type=MarketType.SPOT,
             position_direction=PositionDirection.LONG,
             margin_enabled=False,
