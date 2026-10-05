@@ -65,7 +65,7 @@ class OrderIntent:
         quantity: Decimal,
         limit_price: Decimal | None = None,
         instrument: CanonicalInstrumentId = BTC_EUR,
-    ) -> "OrderIntent":
+    ) -> OrderIntent:
         _validate_binding(strategy_evaluation, risk_decision, side)
         _validate_order_fields(instrument, side, order_type, quantity, limit_price)
         signal = strategy_evaluation.signal
@@ -96,15 +96,21 @@ class OrderIntent:
 
     def __post_init__(self) -> None:
         _validate_order_fields(
-            self.instrument, self.side, self.order_type, self.quantity, self.limit_price
+            self.instrument,
+            self.side,
+            self.order_type,
+            self.quantity,
+            self.limit_price,
         )
-        if (
-            self.venue is not VenueId.KRAKEN
-            or type(self.strategy_evaluation_identity) is not ContentIdentity
-            or type(self.strategy_signal_identity) is not ContentIdentity
-            or type(self.risk_decision_identity) is not ContentIdentity
-            or type(self.idempotency_key) is not ContentIdentity
-        ):
+        identities = (
+            self.strategy_evaluation_identity,
+            self.strategy_signal_identity,
+            self.risk_decision_identity,
+            self.idempotency_key,
+        )
+        if self.venue is not VenueId.KRAKEN:
+            raise ExecutionError("EXECUTION_INTENT_INVALID")
+        if any(type(value) is not ContentIdentity for value in identities):
             raise ExecutionError("EXECUTION_INTENT_INVALID")
 
 
@@ -113,19 +119,20 @@ def _validate_binding(
     risk_decision: RiskDecision,
     side: OrderSide,
 ) -> None:
-    if (
-        type(strategy_evaluation) is not StrategyEvaluation
-        or strategy_evaluation.signal is None
-        or type(risk_decision) is not RiskDecision
-        or risk_decision.status is not RiskStatus.APPROVED
-        or risk_decision.provenance.strategy_evaluation_identity
-        != strategy_evaluation.content_identity
-        or risk_decision.provenance.strategy_signal_identity
-        != strategy_evaluation.signal.content_identity
-    ):
+    if type(strategy_evaluation) is not StrategyEvaluation:
+        raise ExecutionError("RISK_BINDING_INVALID")
+    signal = strategy_evaluation.signal
+    if signal is None or type(risk_decision) is not RiskDecision:
+        raise ExecutionError("RISK_BINDING_INVALID")
+    if risk_decision.status is not RiskStatus.APPROVED:
+        raise ExecutionError("RISK_BINDING_INVALID")
+    provenance = risk_decision.provenance
+    if provenance.strategy_evaluation_identity != strategy_evaluation.content_identity:
+        raise ExecutionError("RISK_BINDING_INVALID")
+    if provenance.strategy_signal_identity != signal.content_identity:
         raise ExecutionError("RISK_BINDING_INVALID")
     expected = SignalKind.LONG_ENTRY if side is OrderSide.BUY else SignalKind.EXIT
-    if strategy_evaluation.signal.kind is not expected:
+    if signal.kind is not expected:
         raise ExecutionError("STRATEGY_SIDE_MISMATCH")
     if strategy_evaluation.provenance.symbol != BTC_EUR.symbol:
         raise ExecutionError("INSTRUMENT_NOT_AUTHORIZED")
@@ -138,25 +145,27 @@ def _validate_order_fields(
     quantity: Decimal,
     limit_price: Decimal | None,
 ) -> None:
-    if (
-        type(instrument) is not CanonicalInstrumentId
-        or instrument != BTC_EUR
-        or instrument.market is not MarketKind.SPOT
-        or type(side) is not OrderSide
-        or type(order_type) is not OrderType
-        or type(quantity) is not Decimal
-        or not quantity.is_finite()
-        or quantity <= 0
-    ):
+    instrument_valid = (
+        type(instrument) is CanonicalInstrumentId
+        and instrument == BTC_EUR
+        and instrument.market is MarketKind.SPOT
+    )
+    quantity_valid = (
+        type(quantity) is Decimal and quantity.is_finite() and quantity > Decimal(0)
+    )
+    if not instrument_valid:
+        raise ExecutionError("ORDER_FIELDS_INVALID")
+    if type(side) is not OrderSide or type(order_type) is not OrderType:
+        raise ExecutionError("ORDER_FIELDS_INVALID")
+    if not quantity_valid:
         raise ExecutionError("ORDER_FIELDS_INVALID")
     if order_type is OrderType.MARKET and limit_price is not None:
         raise ExecutionError("MARKET_PRICE_FORBIDDEN")
-    if order_type is OrderType.LIMIT and (
-        type(limit_price) is not Decimal
-        or not limit_price.is_finite()
-        or limit_price <= 0
-    ):
-        raise ExecutionError("LIMIT_PRICE_REQUIRED")
+    if order_type is OrderType.LIMIT:
+        if type(limit_price) is not Decimal:
+            raise ExecutionError("LIMIT_PRICE_REQUIRED")
+        if not limit_price.is_finite() or limit_price <= Decimal(0):
+            raise ExecutionError("LIMIT_PRICE_REQUIRED")
 
 
 _ALLOWED_TRANSITIONS: dict[SubmissionState, frozenset[SubmissionState]] = {
@@ -179,7 +188,9 @@ class ExecutionLedger:
     __slots__ = ("_path",)
 
     def __init__(self, path: Path) -> None:
-        if type(path) is not Path or (path.exists() and path.is_symlink()):
+        if type(path) is not Path:
+            raise ExecutionError("LEDGER_PATH_INVALID")
+        if path.exists() and path.is_symlink():
             raise ExecutionError("LEDGER_PATH_INVALID")
         self._path = path
 
@@ -228,12 +239,12 @@ class ExecutionLedger:
         if type(key) is not ContentIdentity:
             raise ExecutionError("LEDGER_KEY_INVALID")
         self.initialize()
+        query = (
+            "SELECT state FROM execution_transitions "
+            "WHERE idempotency_key = ? ORDER BY sequence DESC LIMIT 1"
+        )
         with sqlite3.connect(self._path) as db:
-            row = db.execute(
-                "SELECT state FROM execution_transitions "
-                "WHERE idempotency_key = ? ORDER BY sequence DESC LIMIT 1",
-                (str(key),),
-            ).fetchone()
+            row = db.execute(query, (str(key),)).fetchone()
         return None if row is None else SubmissionState(row[0])
 
     def _append(
@@ -246,19 +257,21 @@ class ExecutionLedger:
         if type(key) is not ContentIdentity or type(state) is not SubmissionState:
             raise ExecutionError("LEDGER_INPUT_INVALID")
         self.initialize()
+        query = (
+            "INSERT INTO execution_transitions "
+            "(idempotency_key, state, previous_state, reason_code) "
+            "VALUES (?, ?, ?, ?)"
+        )
+        values = (
+            str(key),
+            state.value,
+            None if previous is None else previous.value,
+            reason_code,
+        )
         try:
             with sqlite3.connect(self._path) as db:
                 db.execute("BEGIN IMMEDIATE")
-                db.execute(
-                    "INSERT INTO execution_transitions "
-                    "(idempotency_key, state, previous_state, reason_code) VALUES (?, ?, ?, ?)",
-                    (
-                        str(key),
-                        state.value,
-                        None if previous is None else previous.value,
-                        reason_code,
-                    ),
-                )
+                db.execute(query, values)
                 db.commit()
         except sqlite3.IntegrityError:
             raise ExecutionError("IDEMPOTENCY_KEY_ALREADY_RECORDED") from None
