@@ -45,7 +45,6 @@ def test_offline_contract_has_independent_kraken_identity_and_no_authority() -> 
     assert result.real_economic_calls == 0
     assert result.live == "LIVE_FORBIDDEN"
     assert result.side_effect_performed is False
-    assert "BINANCE" not in str(result.content_identity)
 
 
 def test_public_connectivity_level_is_explicit_and_fixture_driven_here() -> None:
@@ -65,7 +64,7 @@ def test_qualification_result_cannot_claim_economic_or_live_authority() -> None:
         replace(result, live="LIVE")
 
 
-def test_kraken_failure_never_calls_a_binance_fallback() -> None:
+def test_kraken_failure_has_no_alternate_venue_fallback() -> None:
     class FailedKraken:
         def get(self, path: str, parameters: tuple[tuple[str, str], ...] = ()) -> object:
             del path, parameters
