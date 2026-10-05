@@ -44,7 +44,7 @@ def fills() -> tuple[SimulatedFill, SimulatedFill]:
 
 
 def accounting_input(*executions: AccountingExecution) -> AccountingReplayInput:
-    return AccountingReplayInput(Decimal("100"), "USDT", tuple(executions))
+    return AccountingReplayInput(Decimal("100"), "EUR", tuple(executions))
 
 
 def rebind_fill(fill: SimulatedFill, symbol: str) -> SimulatedFill:
@@ -109,7 +109,7 @@ def test_buy_entry_records_cash_position_and_immutable_ledger() -> None:
     assert result.status is AccountingStatus.COMPLETED
     assert result.final_state.cash == Decimal("91.0")
     assert result.final_state.position.status is AccountingPositionStatus.OPEN_LONG
-    assert result.final_state.position.symbol == "BTCUSDT"
+    assert result.final_state.position.symbol == "BTC/EUR"
     assert result.final_state.position.quantity == Decimal("2")
     assert result.final_state.position.average_entry_price == Decimal("4.5")
     assert result.ledger[0].cash_delta == Decimal("-9.0")
@@ -150,7 +150,7 @@ def test_replay_is_deterministic() -> None:
 def test_insufficient_cash_is_blocked_without_entry() -> None:
     entry, _ = fills()
     result = AccountingEngine().replay(
-        AccountingReplayInput(Decimal("1"), "USDT", (AccountingExecution(entry, Decimal("2")),))
+        AccountingReplayInput(Decimal("1"), "EUR", (AccountingExecution(entry, Decimal("2")),))
     )
 
     assert result.status is AccountingStatus.BLOCKED
@@ -171,7 +171,7 @@ def test_duplicate_fill_is_blocked_without_silent_deduplication() -> None:
 
 def test_wrong_exit_symbol_is_blocked() -> None:
     entry, exit_fill = fills()
-    exit_fill = rebind_fill(exit_fill, "ETHUSDT")
+    exit_fill = rebind_fill(exit_fill, "ETH/EUR")
     result = AccountingEngine().replay(
         accounting_input(
             AccountingExecution(entry, Decimal("2")),
