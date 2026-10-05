@@ -186,7 +186,7 @@ class ExecutionLedger:
     __slots__ = ("_path",)
 
     def __init__(self, path: Path) -> None:
-        if type(path) is not Path:
+        if not isinstance(path, Path):
             raise ExecutionError("LEDGER_PATH_INVALID")
         if path.exists() and path.is_symlink():
             raise ExecutionError("LEDGER_PATH_INVALID")
