@@ -17,7 +17,7 @@ from atp.exchange.contracts import (
     VenueId,
     VenueInstrumentMappingEvidence,
 )
-from atp.exchange.execution import ExecutionError, OrderIntent, OrderSide, OrderType
+from atp.exchange.execution import ExecutionError, OrderIntent, OrderType
 from atp.shared.identity import ContentIdentity
 
 
@@ -50,7 +50,7 @@ class KrakenOrderPreflight:
         mapping: VenueInstrumentMappingEvidence,
         metadata: PublicInstrumentMetadata,
         market_price: PublicPriceEvidence | None = None,
-    ) -> "KrakenOrderPreflight":
+    ) -> KrakenOrderPreflight:
         if type(intent) is not OrderIntent:
             raise ExecutionError("EXECUTION_INTENT_INVALID")
         intent.validate()
