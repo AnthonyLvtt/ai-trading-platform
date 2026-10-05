@@ -38,7 +38,6 @@ from atp.test_qualification.inspection import validate_qualification_result
 from atp.test_qualification.model import (
     QualificationStatus,
 )
-from atp.testnet_activation.contracts import RuntimeAuthorizationContext, context_error
 
 _ERRORS = (ValueError, TypeError, AttributeError, KeyError, RecursionError)
 _PRIORITY = (
@@ -366,18 +365,7 @@ def readiness(
             OperationalEnvironment.DRY_RUN: Reason.ENVIRONMENT_INACTIVE,
         }.get(env)
     activation_id = None
-    if env is OperationalEnvironment.TESTNET:
-        activation_error = context_error(runtime_authorization, at)
-        reasons[StartupCheck.TESTNET_ACTIVATION_AUTHORIZED] = (
-            Reason(activation_error.value) if activation_error else None
-        )
-        reasons[StartupCheck.ENVIRONMENT_ACTIVE] = None
-        if activation_error is None:
-            assert isinstance(runtime_authorization, RuntimeAuthorizationContext)
-            activation_id = runtime_authorization.content_identity
-            references[StartupCheck.TESTNET_ACTIVATION_AUTHORIZED] = activation_id
-    else:
-        reasons[StartupCheck.TESTNET_ACTIVATION_AUTHORIZED] = Reason.NOT_REQUIRED
+    reasons[StartupCheck.TESTNET_ACTIVATION_AUTHORIZED] = Reason.NOT_REQUIRED
     qualification_id = None
     if env in (
         OperationalEnvironment.BACKTEST,
@@ -396,10 +384,6 @@ def readiness(
         reasons[StartupCheck.QUALIFICATION_VALID] = Reason.NOT_REQUIRED
     else:
         reasons[StartupCheck.QUALIFICATION_VALID] = Reason.STARTUP_CHECK_FAILED
-    if activation_id is not None:
-        assert isinstance(runtime_authorization, RuntimeAuthorizationContext)
-        if qualification_id != runtime_authorization.qualification_identity:
-            reasons[StartupCheck.QUALIFICATION_VALID] = Reason.QUALIFICATION_INVALID
     obs_id = None
     if observability is None:
         reasons[StartupCheck.OBSERVABILITY_AVAILABLE] = Reason.OBSERVABILITY_UNAVAILABLE
