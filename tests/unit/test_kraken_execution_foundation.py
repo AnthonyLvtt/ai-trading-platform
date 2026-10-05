@@ -30,7 +30,8 @@ from atp.risk.model import (
     PositionSide,
     RiskMarketContext,
 )
-from atp.risk.policy import RISK_POLICY_V1
+from atp.risk.identity import RiskPolicyId
+from atp.risk.policy import RiskPolicy
 from atp.shared.environment import Environment
 from atp.strategy.model import SignalKind
 from tests.unit.test_strategy_baseline import context, snapshot, strategy
@@ -62,7 +63,7 @@ def approved(signal_kind: SignalKind):
             ),
         )
     )
-    risk = DeterministicRiskEngine(RISK_POLICY_V1).evaluate(
+    risk = DeterministicRiskEngine(RiskPolicy.v1(policy_id=RiskPolicyId("risk-v1"), version="1.0.0")).evaluate(
         RiskEvaluationContext(evaluation, market, portfolio)
     )
     assert risk.decision is not None
