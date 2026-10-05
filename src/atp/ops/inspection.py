@@ -129,7 +129,10 @@ def validate_readiness_result(value: object) -> bool:
         activation_check = checks[StartupCheck.TESTNET_ACTIVATION_AUTHORIZED]
         if activation_check.evidence_identity != value.runtime_authorization_identity:
             return False
-        if value.environment is OperationalEnvironment.TESTNET and value.readiness_status is ReadinessStatus.READY:
+        if (
+            value.environment is OperationalEnvironment.TESTNET
+            and value.readiness_status is ReadinessStatus.READY
+        ):
             return False
         if value.config is not None:
             config = value.config
