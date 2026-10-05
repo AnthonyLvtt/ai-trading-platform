@@ -196,22 +196,7 @@ def parse_api_key_info(
     """Sanitize API-key metadata down to the exact least-privilege capability."""
     _bound(reference)
     result = _envelope(payload)
-    expected = {
-        "apiKeyName",
-        "apiKey",
-        "nonce",
-        "nonceWindow",
-        "permissions",
-        "iban",
-        "validUntil",
-        "queryFrom",
-        "queryTo",
-        "createdTime",
-        "modifiedTime",
-        "ipAllowlist",
-        "lastUsed",
-    }
-    if type(result) is not dict or set(result) != expected:
+    if type(result) is not dict or "permissions" not in result:
         raise KrakenPrivateError("KRAKEN_API_KEY_INFO_INVALID")
     permissions = result.get("permissions")
     if (
