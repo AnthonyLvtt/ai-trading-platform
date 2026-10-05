@@ -82,7 +82,7 @@ def test_data_to_strategy_to_risk_decision_vertical_slice() -> None:
         universe_snapshot_id=UniverseSnapshotId("universe:risk-contract:v1"),
         created_at=start,
         effective_at=start,
-        rules_version="spot-usdt-v1",
+        rules_version="spot-eur-v1",
         source_snapshot_ids=(data.snapshot_id,),
         decisions=(SymbolDecision("BTC/EUR", True, "eligible fixture", start),),
     )
