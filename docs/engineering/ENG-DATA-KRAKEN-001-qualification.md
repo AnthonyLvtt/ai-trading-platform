@@ -13,7 +13,7 @@ economic or Live authority.
 
 Both levels bind the Kraken mapping, candle evidence, input-only ingestion provenance,
 lineage, canonical snapshot and exact inspected source. A Kraken failure remains a Kraken
-failure; no Binance fallback exists.
+failure; no alternate venue fallback exists.
 
 ## Canonical projection
 
