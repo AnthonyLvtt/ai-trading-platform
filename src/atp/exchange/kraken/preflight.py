@@ -18,6 +18,7 @@ from atp.exchange.contracts import (
     VenueInstrumentMappingEvidence,
 )
 from atp.exchange.execution import ExecutionError, OrderIntent, OrderType
+from atp.exchange.read_only import verify_record
 from atp.shared.identity import ContentIdentity
 
 
@@ -197,6 +198,7 @@ def _validate_evidence(
 ) -> None:
     if (
         type(mapping) is not VenueInstrumentMappingEvidence
+        or not verify_record(mapping, VenueInstrumentMappingEvidence)
         or mapping.venue is not VenueId.KRAKEN
         or mapping.instrument != intent.instrument
         or mapping.instrument_status != "online"
@@ -204,6 +206,7 @@ def _validate_evidence(
         raise ExecutionError("KRAKEN_MAPPING_NOT_AUTHORIZED")
     if (
         type(metadata) is not PublicInstrumentMetadata
+        or not verify_record(metadata, PublicInstrumentMetadata)
         or metadata.venue is not VenueId.KRAKEN
         or metadata.instrument != intent.instrument
         or metadata.mapping_identity != mapping.content_identity
@@ -217,6 +220,7 @@ def _validate_evidence(
         return
     if (
         type(market_price) is not PublicPriceEvidence
+        or not verify_record(market_price, PublicPriceEvidence)
         or market_price.venue is not VenueId.KRAKEN
         or market_price.instrument != intent.instrument
         or market_price.mapping_identity != mapping.content_identity
