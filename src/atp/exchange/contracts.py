@@ -1,8 +1,6 @@
-"""Exchange-neutral public Spot contracts.
+"""Kraken-only public Spot contracts.
 
-These records carry no credentials and grant no execution authority. Existing Binance
-execution records deliberately remain in :mod:`atp.exchange.model` so their serialized
-identities are unchanged.
+These records carry no credentials and grant no execution authority.
 """
 
 from __future__ import annotations
@@ -19,7 +17,6 @@ from atp.shared.identity import ContentIdentity
 
 
 class VenueId(StrEnum):
-    BINANCE = "BINANCE"
     KRAKEN = "KRAKEN"
 
 
@@ -51,7 +48,6 @@ class CanonicalInstrumentId(EvidenceRecord):
 
 
 BTC_EUR = CanonicalInstrumentId("BTC", "EUR")
-BTC_USDT = CanonicalInstrumentId("BTC", "USDT")
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +64,7 @@ class VenueInstrumentMappingEvidence(EvidenceRecord):
 
     def __post_init__(self) -> None:
         if (
-            type(self.venue) is not VenueId
+            self.venue is not VenueId.KRAKEN
             or type(self.instrument) is not CanonicalInstrumentId
             or type(self.native_identifier) is not str
             or not self.native_identifier
@@ -170,11 +166,15 @@ class PublicPriceEvidence(EvidenceRecord):
     event_time: datetime | None = None
 
     def __post_init__(self) -> None:
-        if self.freshness not in {"UNKNOWN", "OBSERVATION_FRESH"} or (
-            self.freshness == "OBSERVATION_FRESH"
-            and (
-                self.observation is None
-                or self.observation.response_received_at != self.observed_at
+        if (
+            self.venue is not VenueId.KRAKEN
+            or self.freshness not in {"UNKNOWN", "OBSERVATION_FRESH"}
+            or (
+                self.freshness == "OBSERVATION_FRESH"
+                and (
+                    self.observation is None
+                    or self.observation.response_received_at != self.observed_at
+                )
             )
         ):
             raise EvidenceError("PUBLIC_PRICE_FRESHNESS_INVALID")
@@ -185,13 +185,10 @@ class PublicExchangePort(Protocol):
     venue: VenueId
 
     def server_time(self, observed_at: datetime) -> PublicServerTimeEvidence: ...
-
     def system_status(self, observed_at: datetime) -> PublicSystemStatusEvidence: ...
-
     def instrument_metadata(
         self, instrument: CanonicalInstrumentId, observed_at: datetime
     ) -> tuple[VenueInstrumentMappingEvidence, PublicInstrumentMetadata]: ...
-
     def closed_candles(
         self,
         instrument: CanonicalInstrumentId,
@@ -199,7 +196,6 @@ class PublicExchangePort(Protocol):
         interval_minutes: int,
         observed_at: datetime,
     ) -> PublicCandleEvidence: ...
-
     def price(
         self,
         instrument: CanonicalInstrumentId,
@@ -214,13 +210,11 @@ class VenueSelectionError(EvidenceError):
 
 @dataclass(frozen=True, slots=True)
 class SelectedPublicExchange:
-    """Binds exactly one explicit venue to one public port; there is no fallback list."""
-
     venue: VenueId
     port: PublicExchangePort
 
     def __post_init__(self) -> None:
-        if type(self.venue) is not VenueId or self.port.venue is not self.venue:
+        if self.venue is not VenueId.KRAKEN or self.port.venue is not VenueId.KRAKEN:
             raise VenueSelectionError("VENUE_MISMATCH")
 
     def require_mapping(
@@ -228,5 +222,5 @@ class SelectedPublicExchange:
         instrument: CanonicalInstrumentId,
         mapping: VenueInstrumentMappingEvidence,
     ) -> None:
-        if mapping.venue is not self.venue or mapping.instrument != instrument:
+        if mapping.venue is not VenueId.KRAKEN or mapping.instrument != instrument:
             raise VenueSelectionError("FOREIGN_MAPPING")
