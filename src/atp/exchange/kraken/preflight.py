@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from atp.exchange.contracts import (
@@ -20,6 +21,8 @@ from atp.exchange.contracts import (
 from atp.exchange.execution import ExecutionError, OrderIntent, OrderType
 from atp.exchange.read_only import verify_record
 from atp.shared.identity import ContentIdentity
+
+MAX_PUBLIC_PRICE_AGE = timedelta(seconds=10)
 
 
 def _decimal_text(value: Decimal) -> str:
@@ -51,11 +54,12 @@ class KrakenOrderPreflight:
         mapping: VenueInstrumentMappingEvidence,
         metadata: PublicInstrumentMetadata,
         market_price: PublicPriceEvidence | None = None,
+        evaluated_at: datetime | None = None,
     ) -> KrakenOrderPreflight:
         if type(intent) is not OrderIntent:
             raise ExecutionError("EXECUTION_INTENT_INVALID")
         intent.validate()
-        _validate_evidence(intent, mapping, metadata, market_price)
+        _validate_evidence(intent, mapping, metadata, market_price, evaluated_at)
         _validate_constraints(intent, metadata, market_price)
 
         client_order_id = f"atp-{intent.idempotency_key.digest[:14]}"
@@ -176,15 +180,20 @@ class KrakenOrderPreflight:
         mapping: VenueInstrumentMappingEvidence,
         metadata: PublicInstrumentMetadata,
         market_price: PublicPriceEvidence | None = None,
+        evaluated_at: datetime | None = None,
     ) -> None:
         """Rebuild against caller-supplied evidence; a digest alone is not authority.
 
-        Freshness retains the supplied evidence's observation semantics. This method
-        does not certify present-time freshness or authorize economic submission.
+        Price age is checked against the caller-supplied evaluation time. This
+        method does not authenticate that time or authorize economic submission.
         """
         self.validate()
         expected = KrakenOrderPreflight.build(
-            intent=intent, mapping=mapping, metadata=metadata, market_price=market_price
+            intent=intent,
+            mapping=mapping,
+            metadata=metadata,
+            market_price=market_price,
+            evaluated_at=evaluated_at,
         )
         if self != expected:
             raise ExecutionError("KRAKEN_PREFLIGHT_BINDING_INVALID")
@@ -195,7 +204,14 @@ def _validate_evidence(
     mapping: VenueInstrumentMappingEvidence,
     metadata: PublicInstrumentMetadata,
     market_price: PublicPriceEvidence | None,
+    evaluated_at: datetime | None,
 ) -> None:
+    if evaluated_at is not None and (
+        type(evaluated_at) is not datetime
+        or evaluated_at.tzinfo is None
+        or evaluated_at.utcoffset() is None
+    ):
+        raise ExecutionError("KRAKEN_PREFLIGHT_TIME_INVALID")
     if (
         type(mapping) is not VenueInstrumentMappingEvidence
         or not verify_record(mapping, VenueInstrumentMappingEvidence)
@@ -227,6 +243,11 @@ def _validate_evidence(
         or market_price.freshness != "OBSERVATION_FRESH"
     ):
         raise ExecutionError("KRAKEN_PRICE_EVIDENCE_INVALID")
+    if evaluated_at is None:
+        raise ExecutionError("KRAKEN_PRICE_EVALUATION_TIME_REQUIRED")
+    age = evaluated_at.astimezone(UTC) - market_price.observed_at.astimezone(UTC)
+    if not timedelta(0) <= age <= MAX_PUBLIC_PRICE_AGE:
+        raise ExecutionError("KRAKEN_PRICE_EVIDENCE_EXPIRED")
 
 
 def _validate_constraints(
