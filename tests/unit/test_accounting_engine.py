@@ -408,7 +408,7 @@ def test_well_typed_tampered_replay_state_fails_closed_during_valuation() -> Non
     [
         ("policy_id", AccountingPolicyId("ATP_ACCOUNTING_V2")),
         ("version", "1.1"),
-        ("currency", "EUR"),
+        ("currency", "USDT"),
     ],
 )
 def test_non_normative_accounting_policy_is_rejected(field: str, value: object) -> None:
@@ -418,7 +418,7 @@ def test_non_normative_accounting_policy_is_rejected(field: str, value: object) 
 
 def test_engine_rejects_policy_mutated_after_construction() -> None:
     policy = replace(ACCOUNTING_POLICY_V1)
-    object.__setattr__(policy, "currency", "EUR")
+    object.__setattr__(policy, "currency", "USDT")
 
     with pytest.raises(ValidationError):
         AccountingEngine(policy)
