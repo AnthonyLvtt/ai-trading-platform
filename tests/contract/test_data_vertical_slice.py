@@ -58,7 +58,7 @@ def test_historical_input_to_consumable_data_vertical_slice() -> None:
         universe_snapshot_id=UniverseSnapshotId("universe:2026-01-01:v1"),
         created_at=available_at,
         effective_at=available_at,
-        rules_version="spot-usdt-v1",
+        rules_version="spot-eur-v1",
         source_snapshot_ids=(snapshot.snapshot_id,),
         decisions=(
             SymbolDecision(
@@ -122,7 +122,7 @@ def test_historical_replay_preserves_validation_known_at_original_use() -> None:
         universe_snapshot_id=UniverseSnapshotId("universe-used-before-late-invalidation"),
         created_at=event_time,
         effective_at=event_time,
-        rules_version="spot-usdt-v1",
+        rules_version="spot-eur-v1",
         source_snapshot_ids=(used_snapshot.snapshot_id,),
         decisions=(SymbolDecision("BTC/EUR", True, "historically eligible", event_time),),
     )
