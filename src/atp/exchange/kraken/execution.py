@@ -19,4 +19,5 @@ class DisabledKrakenEconomicTransport(EconomicExecutionPort):
     def submit(self, intent: OrderIntent) -> None:
         if type(intent) is not OrderIntent:
             raise ExecutionError("EXECUTION_INTENT_INVALID")
+        intent.validate()
         raise ExecutionError("KRAKEN_ECONOMIC_EXECUTION_NOT_QUALIFIED")
