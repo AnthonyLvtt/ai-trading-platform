@@ -68,7 +68,7 @@ def test_validated_data_to_deterministic_strategy_signal_vertical_slice() -> Non
         universe_snapshot_id=UniverseSnapshotId("universe:strategy-contract:v1"),
         created_at=start,
         effective_at=start,
-        rules_version="spot-usdt-v1",
+        rules_version="spot-eur-v1",
         source_snapshot_ids=(data.snapshot_id,),
         decisions=(SymbolDecision("BTC/EUR", True, "eligible fixture", start),),
     )
