@@ -1,8 +1,10 @@
 # AI Trading Platform
 
-ATP is a modular algorithmic-trading platform. V1 targets Binance Spot, LONG only, with a single position.
+ATP is a modular algorithmic-trading platform. V1 is Kraken-only, Spot, LONG only, with a single position.
 
-This repository contains the modular-monolith engineering foundation and the V1 module boundaries: Market Data, Strategy, Risk, OMS, Exchange Adapter, Accounting, Backtesting/Simulation, Observability, Web supervision, Test/Qualification, Release/Deployment and Operations, plus the Binance Spot Testnet qualification, activation-grant and first-order preparation contracts. The operator command `scripts/submit_first_testnet_order.py` keeps `--check-only`, `--watch` and `--pre-watch-feasibility` read-only. Its separate `--execute` path requires all external approvals, fresh evidence and the canonical durable campaign ledger; no submission is authorized by installation, CI or merge. See [ENG-TO-OPS-008A](docs/engineering/ENG-TO-OPS-008A-decisions.md); operational readiness remains NO-GO pending CTO review. Live trading is forbidden, and credentials are never stored in the repository.
+This repository contains the modular-monolith engineering foundation and the V1 module boundaries: Market Data, Strategy, Risk, OMS, Exchange Adapter, Accounting, Backtesting/Simulation, Observability, Web supervision, Test/Qualification, Release/Deployment and Operations.
+
+Kraken is the sole venue. The canonical initial instrument is `BTC/EUR` Spot. Public connectivity and bounded private read-only capabilities are qualified independently. No economic Kraken execution is authorized by installation, CI, merge, credentials, or read-only qualification. Live trading is forbidden, and credentials are never stored in the repository.
 
 ## Requirements
 
@@ -51,10 +53,9 @@ The diagnostic loads an explicit environment, emits a structured JSON log, and d
 - `src/atp/test_qualification` — TEST/qualification boundary
 - `src/atp/ops` — Operations boundary
 - `src/atp/web` — Web supervision boundary
-- `src/atp/exchange` — Exchange Adapter boundary and read-only Exchange evidence
-- `src/atp/testnet_qualification` — Testnet qualification suite
-- `src/atp/testnet_activation` — Testnet activation grant, credential capability and trust boundaries
-- `src/atp/first_testnet_order` — first Testnet order authorization, read-only preparation, watcher and pre-watch feasibility
+- `src/atp/exchange` — canonical Exchange boundary and Kraken adapter
+- `src/atp/kraken_qualification` — Kraken qualification
+- `src/atp/kraken_private_qualification` — bounded private read-only Kraken qualification
 - `src/atp/release_deployment` — Release/Deployment boundary
 - `src/atp/persistence` — persistence ports/adapters boundary
 - `scripts` — operator and qualification commands
