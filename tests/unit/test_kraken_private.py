@@ -132,6 +132,25 @@ def test_write_permissions_never_create_read_capability(permission: str, reason:
         parse_api_key_info(payload, reference(), AT)
 
 
+def test_api_key_info_tolerates_additional_metadata_fields() -> None:
+    payload = fixture("api-key-info.json")
+    payload["result"]["newMetadataField"] = {"opaque": True}
+
+    capability = parse_api_key_info(payload, reference(), AT)
+
+    assert capability.permissions == ("query-funds", "query-open-trades")
+    assert capability.trading_capability_absent is True
+    assert capability.withdrawal_capability_absent is True
+
+
+def test_api_key_info_requires_permissions_field() -> None:
+    payload = fixture("api-key-info.json")
+    del payload["result"]["permissions"]
+
+    with pytest.raises(KrakenPrivateError, match="KRAKEN_API_KEY_INFO_INVALID"):
+        parse_api_key_info(payload, reference(), AT)
+
+
 @pytest.mark.parametrize("asset", ["USDT", "XXBT.F", "ZEUR.M", "UNKNOWN"])
 def test_unknown_or_suffixed_balance_assets_fail_closed(asset: str) -> None:
     ref, capability, _, _, _ = evidence()
