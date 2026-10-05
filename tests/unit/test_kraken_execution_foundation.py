@@ -37,11 +37,7 @@ from tests.unit.test_strategy_baseline import context, snapshot, strategy
 
 
 def approved(signal_kind: SignalKind):
-    closes = (
-        ("3", "2", "1", "4")
-        if signal_kind is SignalKind.LONG_ENTRY
-        else ("1", "2", "3", "0")
-    )
+    closes = ("3", "2", "1", "4") if signal_kind is SignalKind.LONG_ENTRY else ("1", "2", "3", "0")
     evaluation = strategy().evaluate(context(snapshot(closes)))
     market = RiskMarketContext(
         symbol=BTC_EUR.symbol,
@@ -57,7 +53,13 @@ def approved(signal_kind: SignalKind):
         if signal_kind is SignalKind.LONG_ENTRY
         else PortfolioState.create(
             PortfolioKnowledgeStatus.KNOWN_OPEN,
-            (OpenPosition(PositionId("position:fixture"), BTC_EUR.symbol, PositionSide.LONG),),
+            (
+                OpenPosition(
+                    PositionId("position:fixture"),
+                    BTC_EUR.symbol,
+                    PositionSide.LONG,
+                ),
+            ),
         )
     )
     risk = DeterministicRiskEngine(RISK_POLICY_V1).evaluate(
@@ -148,15 +150,27 @@ def test_ledger_is_append_only_idempotent_and_models_ambiguity(tmp_path: Path) -
     ledger = ExecutionLedger(tmp_path / "execution.sqlite")
     ledger.prepare(intent)
     assert ledger.current_state(intent.idempotency_key) is SubmissionState.PREPARED
-    ledger.transition(intent, SubmissionState.ATTEMPT_STARTED, reason_code="ATTEMPT_RESERVED")
+    ledger.transition(
+        intent,
+        SubmissionState.ATTEMPT_STARTED,
+        reason_code="ATTEMPT_RESERVED",
+    )
     ledger.transition(intent, SubmissionState.UNKNOWN, reason_code="OUTCOME_AMBIGUOUS")
     assert ledger.current_state(intent.idempotency_key) is SubmissionState.UNKNOWN
-    ledger.transition(intent, SubmissionState.RECONCILED, reason_code="READ_ONLY_RECONCILED")
+    ledger.transition(
+        intent,
+        SubmissionState.RECONCILED,
+        reason_code="READ_ONLY_RECONCILED",
+    )
     assert ledger.current_state(intent.idempotency_key) is SubmissionState.RECONCILED
     with pytest.raises(ExecutionError, match="IDEMPOTENCY_KEY_ALREADY_RECORDED"):
         ledger.prepare(intent)
     with pytest.raises(ExecutionError, match="LEDGER_TRANSITION_INVALID"):
-        ledger.transition(intent, SubmissionState.ATTEMPT_STARTED, reason_code="INVALID_RETRY")
+        ledger.transition(
+            intent,
+            SubmissionState.ATTEMPT_STARTED,
+            reason_code="INVALID_RETRY",
+        )
 
 
 def test_economic_transport_is_disabled_and_has_no_network_surface() -> None:
