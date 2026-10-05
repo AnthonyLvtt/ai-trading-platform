@@ -245,7 +245,7 @@ def _project(state: WebState, resource: str) -> View:
                 "source": "VALUATION",
                 "accounting_status": valuation.status.value,
                 "reason_code": valuation.reason_code,
-                "currency": "USDT",
+                "currency": "EUR",
                 "cash": _decimal(valuation.cash),
                 "cumulative_realized_pnl": _decimal(valuation.realized_pnl),
                 "unrealized_pnl": _decimal(valuation.unrealized_pnl),
