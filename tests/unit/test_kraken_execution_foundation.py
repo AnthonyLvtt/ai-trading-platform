@@ -19,22 +19,30 @@ from atp.exchange.execution import (
 )
 from atp.exchange.kraken.execution import DisabledKrakenEconomicTransport
 from atp.risk.engine import DeterministicRiskEngine, RiskEvaluationContext
+from atp.risk.identity import PositionId
 from atp.risk.model import (
     InstrumentClass,
     MarketType,
+    OpenPosition,
     PortfolioKnowledgeStatus,
     PortfolioState,
     PositionDirection,
+    PositionSide,
     RiskMarketContext,
 )
 from atp.risk.policy import RISK_POLICY_V1
 from atp.shared.environment import Environment
 from atp.strategy.model import SignalKind
-from tests.unit.test_strategy_baseline import context, strategy
+from tests.unit.test_strategy_baseline import context, snapshot, strategy
 
 
 def approved(signal_kind: SignalKind):
-    evaluation = strategy().evaluate(context(signal_kind=signal_kind))
+    closes = (
+        ("3", "2", "1", "4")
+        if signal_kind is SignalKind.LONG_ENTRY
+        else ("1", "2", "3", "0")
+    )
+    evaluation = strategy().evaluate(context(snapshot(closes)))
     market = RiskMarketContext(
         symbol=BTC_EUR.symbol,
         market_type=MarketType.SPOT,
@@ -44,7 +52,14 @@ def approved(signal_kind: SignalKind):
         instrument_class=InstrumentClass.SPOT,
         environment=Environment.BACKTEST.value,
     )
-    portfolio = PortfolioState.create(PortfolioKnowledgeStatus.KNOWN_EMPTY)
+    portfolio = (
+        PortfolioState.create(PortfolioKnowledgeStatus.KNOWN_EMPTY)
+        if signal_kind is SignalKind.LONG_ENTRY
+        else PortfolioState.create(
+            PortfolioKnowledgeStatus.KNOWN_OPEN,
+            (OpenPosition(PositionId("position:fixture"), BTC_EUR.symbol, PositionSide.LONG),),
+        )
+    )
     risk = DeterministicRiskEngine(RISK_POLICY_V1).evaluate(
         RiskEvaluationContext(evaluation, market, portfolio)
     )
