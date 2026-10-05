@@ -26,7 +26,6 @@ from atp.strategy.model import (
     StrategyEvaluationContext,
     UsedDataPoint,
 )
-from atp.testnet_activation.contracts import RuntimeAuthorizationContext
 
 _BASELINE_DATA_CONTRACT = ConsumerContract(
     accepted_quality=frozenset({DataQuality.VALID}),
@@ -48,22 +47,10 @@ class SmaCrossoverStrategy:
 
     def evaluate(self, context: StrategyEvaluationContext) -> StrategyEvaluation:
         empty_provenance = self._provenance(context, ())
-        if (
-            context.environment not in ACTIVE_ENVIRONMENTS
-            and context.environment is not Environment.TESTNET
-        ):
+        if context.environment not in ACTIVE_ENVIRONMENTS:
             return StrategyEvaluation.blocked(
                 empty_provenance, ReasonCode.RUNTIME_AUTHORIZATION_INVALID
             )
-        if context.environment is Environment.TESTNET:
-            from atp.testnet_activation.contracts import context_error
-
-            if context_error(
-                context.runtime_authorization, context.evaluation_time.value, symbol=context.symbol
-            ):
-                return StrategyEvaluation.blocked(
-                    empty_provenance, ReasonCode.RUNTIME_AUTHORIZATION_INVALID
-                )
         if context.snapshot.environment is not context.environment:
             return StrategyEvaluation.blocked(empty_provenance, ReasonCode.SNAPSHOT_INCOMPATIBLE)
         if (
@@ -146,11 +133,7 @@ class SmaCrossoverStrategy:
                 )
                 for point in points
             ),
-            runtime_authorization_identity=(
-                context.runtime_authorization.content_identity
-                if isinstance(context.runtime_authorization, RuntimeAuthorizationContext)
-                else None
-            ),
+            runtime_authorization_identity=None,
             candle_interval=context.candle_interval,
         )
 
