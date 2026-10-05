@@ -56,3 +56,18 @@ A `PASSED` result requires all of the following:
 Normal pytest and CI use injected transports and make zero private network
 calls. A real `PRIVATE_CONNECTIVITY` run requires separate CTO authorization
 against an exact merged `main` SHA.
+
+## Operational closeout — ENG-EXCH-KRAKEN-003/004/005
+
+The CTO accepted the real, read-only `PRIVATE_CONNECTIVITY` qualification on
+canonical `main` `02aed8705ba342c79edb7b21ae4a76402739dfd5` after PR #34
+merged and post-merge Quality #85 succeeded. The qualified run returned
+`PASSED` after exactly one call each to `GetApiKeyInfo`, `Balance`, and
+`OpenOrders`: `private_network_calls = 3`, `real_economic_calls = 0`,
+`side_effect_performed = false`, and `live = LIVE_FORBIDDEN`.
+
+ENG-EXCH-KRAKEN-003/004/005 are closed for private read-only connectivity.
+This closeout grants no additional Kraken capability and authorizes no further
+real private calls. AddOrder, CancelOrder, funding, withdrawal, leverage,
+Futures/Margin, Live, automatic retry, and venue fallback remain forbidden.
+Any extension requires a new explicit CTO mission.
