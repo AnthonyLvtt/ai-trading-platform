@@ -59,7 +59,7 @@ def test_data_strategy_risk_simulated_execution_vertical_slice() -> None:
     start = datetime(2026, 1, 1, tzinfo=UTC)
     points = tuple(
         DataPoint.from_value(
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
             value={"close": close, "open": open_price},
             temporal=TemporalMetadata(
                 event_time=start + timedelta(minutes=index),
@@ -74,7 +74,7 @@ def test_data_strategy_risk_simulated_execution_vertical_slice() -> None:
         )
     )
     snapshot = DatasetSnapshot.create(
-        dataset_id=DatasetId("btc-usdt-1m:v1"),
+        dataset_id=DatasetId("btc-eur-1m:v1"),
         snapshot_id=SnapshotId("snapshot:bt-contract:v1"),
         source_id=SourceId("historical-bt-fixture"),
         environment=Environment.BACKTEST,
@@ -95,7 +95,7 @@ def test_data_strategy_risk_simulated_execution_vertical_slice() -> None:
         effective_at=start,
         rules_version="spot-usdt-v1",
         source_snapshot_ids=(snapshot.snapshot_id,),
-        decisions=(SymbolDecision("BTCUSDT", True, "eligible fixture", start),),
+        decisions=(SymbolDecision("BTC/EUR", True, "eligible fixture", start),),
     )
     strategy = SmaCrossoverStrategy(
         strategy_id=StrategyId("sma-crossover"),
@@ -107,7 +107,7 @@ def test_data_strategy_risk_simulated_execution_vertical_slice() -> None:
             snapshot=snapshot,
             universe=universe,
             evaluation_time=LogicalTime(points[3].temporal.event_time),
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
         )
     )
     assert strategy.signal is not None
@@ -118,7 +118,7 @@ def test_data_strategy_risk_simulated_execution_vertical_slice() -> None:
         RiskEvaluationContext(
             strategy_evaluation=strategy,
             market_context=RiskMarketContext(
-                symbol="BTCUSDT",
+                symbol="BTC/EUR",
                 market_type=MarketType.SPOT,
                 position_direction=PositionDirection.LONG,
                 margin_enabled=False,
