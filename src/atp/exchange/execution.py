@@ -203,7 +203,12 @@ class ExecutionLedger:
             db.commit()
 
     def prepare(self, intent: OrderIntent) -> None:
-        self._append(intent.idempotency_key, SubmissionState.PREPARED, None, "INTENT_VALIDATED")
+        self._append(
+            intent.idempotency_key,
+            SubmissionState.PREPARED,
+            None,
+            "INTENT_VALIDATED",
+        )
 
     def transition(
         self,
