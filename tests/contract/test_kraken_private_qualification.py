@@ -51,7 +51,7 @@ def test_source_change_fails_closed(monkeypatch: pytest.MonkeyPatch, clean_sourc
     assert result.source_identity is None
 
 
-def test_no_binance_fallback_is_representable() -> None:
+def test_no_alternate_venue_fallback_is_representable() -> None:
     result = qualify_private_offline(*evidence())
     assert result.venue.value == "KRAKEN"
     assert all(route.startswith("/0/private/") for route in result.route_allowlist)
