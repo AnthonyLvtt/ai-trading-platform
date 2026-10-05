@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -121,17 +120,15 @@ def test_side_and_order_fields_fail_closed() -> None:
 
 def test_tampered_risk_binding_is_rejected() -> None:
     evaluation, decision = approved(SignalKind.LONG_ENTRY)
-    altered = replace(
-        decision,
-        provenance=replace(
-            decision.provenance,
-            strategy_evaluation_identity=decision.provenance.risk_policy_identity,
-        ),
+    object.__setattr__(
+        decision.provenance,
+        "strategy_evaluation_identity",
+        decision.provenance.risk_policy_identity,
     )
     with pytest.raises(ExecutionError, match="RISK_BINDING_INVALID"):
         OrderIntent.create(
             strategy_evaluation=evaluation,
-            risk_decision=altered,
+            risk_decision=decision,
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
             quantity=Decimal("0.001"),
