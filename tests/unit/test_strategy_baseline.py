@@ -48,7 +48,7 @@ def candle(
     close: object,
     index: int,
     *,
-    symbol: str = "BTCUSDT",
+    symbol: str = "BTC/EUR",
     finality: DataFinality = DataFinality.FINAL,
     available_at: datetime | None = None,
 ) -> DataPoint:
@@ -70,7 +70,7 @@ def candle(
 def snapshot(
     closes: tuple[object, ...] = ("3", "2", "1", "4"),
     *,
-    dataset_id: str = "btc-usdt-1m:v1",
+    dataset_id: str = "btc-eur-1m:v1",
     snapshot_id: str = "snapshot-strategy-1",
     schema_version: str = "candle-v1",
     transformation_version: str = "normalize-v1",
@@ -110,7 +110,7 @@ def universe(
     data: DatasetSnapshot,
     *,
     universe_id: str = "universe-strategy-1",
-    symbol: str = "BTCUSDT",
+    symbol: str = "BTC/EUR",
     eligible: bool = True,
     effective_at: datetime | None = None,
     source_snapshot_ids: tuple[SnapshotId, ...] | None = None,
@@ -120,7 +120,7 @@ def universe(
         universe_snapshot_id=UniverseSnapshotId(universe_id),
         created_at=effective,
         effective_at=effective,
-        rules_version="spot-usdt-v1",
+        rules_version="spot-eur-v1",
         source_snapshot_ids=source_snapshot_ids or (data.snapshot_id,),
         decisions=(SymbolDecision(symbol, eligible, "fixture eligibility", effective),),
     )
@@ -140,7 +140,7 @@ def context(
     market_universe: UniverseSnapshot | None = None,
     evaluation_time: datetime | None = None,
     environment: Environment = Environment.BACKTEST,
-    symbol: str = "BTCUSDT",
+    symbol: str = "BTC/EUR",
 ) -> StrategyEvaluationContext:
     return StrategyEvaluationContext(
         environment=environment,

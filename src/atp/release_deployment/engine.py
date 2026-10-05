@@ -38,7 +38,6 @@ from atp.shared.identity import ContentIdentity
 from atp.test_qualification import CASES_V1, SUITE_V1, evaluate_suite
 from atp.test_qualification.inspection import validate_qualification_result
 from atp.test_qualification.model import QualificationStatus
-from atp.testnet_activation.contracts import RuntimeAuthorizationContext, context_error
 
 
 def inspect_wheel(name: str, data: bytes) -> str:
@@ -289,18 +288,7 @@ def promote(
     )
     activation_id = None
     if selected is Target.TESTNET:
-        error = context_error(runtime_authorization, at)
-        reason = Reason(error.value) if error else None
-        if error is None:
-            assert isinstance(runtime_authorization, RuntimeAuthorizationContext)
-            activation_id = runtime_authorization.content_identity
-            if (
-                type(bundle) is not ReleaseBundle
-                or bundle.candidate.content_identity != runtime_authorization.release_identity
-                or bundle.manifest.content_identity
-                != runtime_authorization.release_manifest_identity
-            ):
-                reason = Reason.RELEASE_BINDING_MISMATCH
+        reason = Reason.PROMOTION_TARGET_FORBIDDEN
     if selected is None:
         reason = Reason.PROMOTION_TARGET_FORBIDDEN
     if reason is None:

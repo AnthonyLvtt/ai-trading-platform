@@ -51,7 +51,7 @@ def temporal(
 
 def point(
     *,
-    symbol: str = "BTCUSDT",
+    symbol: str = "BTC/EUR",
     close: str = "100.00",
     timing: TemporalMetadata | None = None,
     finality: DataFinality = DataFinality.FINAL,
@@ -79,7 +79,7 @@ def snapshot(
     degradation_reasons: frozenset[str] = frozenset(),
 ) -> DatasetSnapshot:
     return DatasetSnapshot.create(
-        dataset_id=DatasetId("candles-btcusdt:v1"),
+        dataset_id=DatasetId("candles-btc-eur:v1"),
         snapshot_id=SnapshotId(snapshot_id),
         source_id=SourceId("historical-fixture"),
         environment=Environment.BACKTEST,
@@ -105,9 +105,9 @@ def universe(
         universe_snapshot_id=UniverseSnapshotId("universe-1"),
         created_at=T2,
         effective_at=effective_at,
-        rules_version="spot-usdt-v1",
+        rules_version="spot-eur-v1",
         source_snapshot_ids=(SnapshotId("snapshot-1"),),
-        decisions=decisions or (SymbolDecision("BTCUSDT", True, "historically eligible", T1),),
+        decisions=decisions or (SymbolDecision("BTC/EUR", True, "historically eligible", T1),),
     )
 
 
@@ -165,13 +165,13 @@ def test_availability_derivation_is_deterministic_and_traceable() -> None:
 
 def test_data_point_canonicalizes_logically_equal_payloads() -> None:
     left = DataPoint.from_value(
-        symbol="BTCUSDT",
+        symbol="BTC/EUR",
         value={"close": "100", "volume": "2"},
         temporal=temporal(),
         finality=DataFinality.FINAL,
     )
     right = DataPoint.from_value(
-        symbol="BTCUSDT",
+        symbol="BTC/EUR",
         value={"volume": "2", "close": "100"},
         temporal=temporal(),
         finality=DataFinality.FINAL,
@@ -184,7 +184,7 @@ def test_data_point_canonicalizes_logically_equal_payloads() -> None:
 def test_data_point_rejects_noncanonical_payload_bytes() -> None:
     with pytest.raises(ValidationError, match="canonical JSON"):
         DataPoint(
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
             canonical_payload=b'{"volume": 2, "close": 100}',
             temporal=temporal(),
             finality=DataFinality.FINAL,
@@ -203,8 +203,8 @@ def test_snapshot_content_identity_changes_with_content() -> None:
 
 
 def test_snapshot_order_is_canonical_not_arrival_order() -> None:
-    first = point(symbol="ETHUSDT")
-    second = point(symbol="BTCUSDT")
+    first = point(symbol="ETH/EUR")
+    second = point(symbol="BTC/EUR")
 
     assert (
         snapshot(points=(first, second)).content_identity
@@ -457,26 +457,26 @@ def test_backfill_rejects_rewritten_historical_availability() -> None:
 def test_universe_snapshot_is_immutable_and_deterministic() -> None:
     left = universe(
         decisions=(
-            SymbolDecision("ETHUSDT", False, "not eligible", T1),
-            SymbolDecision("BTCUSDT", True, "eligible", T1),
+            SymbolDecision("ETH/EUR", False, "not eligible", T1),
+            SymbolDecision("BTC/EUR", True, "eligible", T1),
         )
     )
     right = universe(
         decisions=(
-            SymbolDecision("BTCUSDT", True, "eligible", T1),
-            SymbolDecision("ETHUSDT", False, "not eligible", T1),
+            SymbolDecision("BTC/EUR", True, "eligible", T1),
+            SymbolDecision("ETH/EUR", False, "not eligible", T1),
         )
     )
 
     assert left.content_identity == right.content_identity
-    assert left.eligible_symbols == frozenset({"BTCUSDT"})
+    assert left.eligible_symbols == frozenset({"BTC/EUR"})
     with pytest.raises(FrozenInstanceError):
         left.effective_at = T2  # type: ignore[misc]
 
 
 @pytest.mark.parametrize("eligible", [True, False])
 def test_universe_rejects_future_inclusion_or_exclusion_evidence(eligible: bool) -> None:
-    decision = SymbolDecision("BTCUSDT", eligible, "future evidence", T2)
+    decision = SymbolDecision("BTC/EUR", eligible, "future evidence", T2)
 
     with pytest.raises(ValidationError, match="unavailable"):
         universe(effective_at=T1, decisions=(decision,))

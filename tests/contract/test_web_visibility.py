@@ -44,7 +44,7 @@ def real_state(tmp_path, environment="BACKTEST"):
     fill = replay.steps[0].fill
     assert fill is not None
     accounting = AccountingEngine().replay(
-        AccountingReplayInput(Decimal("100"), "USDT", (AccountingExecution(fill, Decimal("2")),))
+        AccountingReplayInput(Decimal("100"), "EUR", (AccountingExecution(fill, Decimal("2")),))
     )
     mark = AccountingMark.from_data(point=snapshot.points[-1], snapshot=snapshot)
     valuation = AccountingEngine().value(

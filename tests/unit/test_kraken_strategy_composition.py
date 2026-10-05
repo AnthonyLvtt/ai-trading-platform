@@ -179,7 +179,7 @@ def test_wrong_canonical_market_contract_fails_closed(change: str) -> None:
     point = points[-1]
     payload = json.loads(point.canonical_payload)
     if change == "symbol":
-        points[-1] = replace(point, symbol="BTCUSDT")
+        points[-1] = replace(point, symbol="ETH/EUR")
     elif change == "interval":
         payload["interval"] = "1m"
         points[-1] = DataPoint.from_value(
@@ -199,7 +199,7 @@ def test_wrong_canonical_market_contract_fails_closed(change: str) -> None:
             ),
         )
     elif change == "instrument":
-        payload["instrument"]["quote_asset"] = "USDT"
+        payload["instrument"]["quote_asset"] = "GBP"
         points[-1] = DataPoint.from_value(
             symbol=point.symbol,
             value=payload,
@@ -207,7 +207,7 @@ def test_wrong_canonical_market_contract_fails_closed(change: str) -> None:
             finality=point.finality,
         )
     else:
-        payload["venue"] = "BINANCE"
+        payload["venue"] = "OTHER"
         points[-1] = DataPoint.from_value(
             symbol=point.symbol,
             value=payload,
@@ -238,20 +238,3 @@ def test_kraken_strategy_identities_are_deterministic_and_alias_free() -> None:
     rendered = repr(universe) + repr(first)
     for alias in ("XBT", "XXBT", "ZEUR", "XXBTZEUR", "XBTEUR"):
         assert alias not in rendered
-
-
-def test_existing_btcusdt_strategy_identity_and_behavior_are_unchanged() -> None:
-    from tests.unit.test_strategy_baseline import context, snapshot, strategy
-
-    result = strategy().evaluate(context(snapshot()))
-    assert result.signal is not None
-    assert result.signal.kind is SignalKind.LONG_ENTRY
-    expected_evaluation_id = (
-        "strategy-evaluation:"
-        "sha256:c2d36c58850230b548ae69ce1b84d3b045cadbb774dc639576c78425ca3d5939"
-    )
-    assert str(result.strategy_evaluation_id) == expected_evaluation_id
-    assert (
-        str(result.content_identity)
-        == "sha256:f9e688bb90068c60ed849a869b601d7a48cb51e568305c4f1ea4fc0df3c023c4"
-    )

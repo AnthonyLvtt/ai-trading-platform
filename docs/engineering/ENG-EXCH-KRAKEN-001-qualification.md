@@ -1,8 +1,6 @@
 # Kraken foundation qualification — PR review corrections
 
-VenueId identifies BINANCE or KRAKEN; MarketKind.SPOT belongs to the canonical
-instrument. Existing Binance serialized ExchangePolicy and first-order records
-are unchanged.
+VenueId identifies KRAKEN; MarketKind.SPOT belongs to the canonical instrument.
 
 Mapping evidence binds the venue, canonical instrument, native identifier and
 aliases, native base/quote, instrument status, metadata digest and observation
@@ -39,8 +37,8 @@ References:
 Both OFFLINE_CONTRACT and PUBLIC_CONNECTIVITY inspect SourceTree immediately
 before and after evaluation. Dirty, unavailable or unequal source fails closed.
 Results bind commit SHA, Git tree SHA, repository identity and SourceTree identity.
-Release binding is explicitly NOT_ESTABLISHED_PRE_MERGE. No ATP Release, Binance
-TQ, deployment, economic or Live authority is claimed.
+Release binding is explicitly NOT_ESTABLISHED_PRE_MERGE. No ATP Release,
+deployment, economic or Live authority is claimed.
 
 After merge, rerun qualification on the exact merged clean main and use the
 existing main-only Release process. A PR result is not presumed equivalent to

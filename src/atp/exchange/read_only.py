@@ -1,24 +1,80 @@
-"""Read-only Exchange evidence contracts. No transport, credentials or execution authority."""
+"""Read-only Exchange evidence contracts for Kraken. No execution authority exists here."""
 
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import dataclass, field, fields, is_dataclass
-from datetime import UTC, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from datetime import UTC, datetime
+from decimal import Decimal
 from enum import StrEnum
-from fractions import Fraction
+from types import UnionType
+from typing import get_args, get_origin, get_type_hints
 
-from atp.exchange.model import canonical, typed
 from atp.observability.events import SENSITIVE_KEYS
 from atp.shared.errors import ValidationError
 from atp.shared.identity import ContentIdentity
-from atp.shared.serialization import canonical_json_bytes
 
 
 class EvidenceError(ValueError):
     pass
+
+
+def _decimal_text(value: Decimal) -> str:
+    text = format(value, "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def canonical(value: object) -> object:
+    if value is None or type(value) in (str, bool, int):
+        return value
+    if isinstance(value, StrEnum):
+        return value.value
+    if type(value) is Decimal:
+        if not value.is_finite():
+            raise ValidationError("invalid decimal")
+        return _decimal_text(value)
+    if type(value) is datetime:
+        if value.tzinfo is None:
+            raise ValidationError("timezone required")
+        return value.astimezone(UTC).isoformat()
+    if type(value) is ContentIdentity:
+        value.__post_init__()
+        return str(value)
+    if type(value) is tuple:
+        return [canonical(item) for item in value]
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            f.name: canonical(getattr(value, f.name))
+            for f in fields(value)
+            if f.name != "content_identity"
+        }
+    raise ValidationError("invalid exchange evidence")
+
+
+def typed(value: object, expected: object, depth: int = 0) -> bool:
+    if depth > 25:
+        return False
+    if get_origin(expected) is UnionType:
+        return any(typed(value, t, depth + 1) for t in get_args(expected))
+    if get_origin(expected) is tuple:
+        args = get_args(expected)
+        return (
+            type(value) is tuple
+            and len(args) == 2
+            and args[1] is Ellipsis
+            and all(typed(v, args[0], depth + 1) for v in value)
+        )
+    if type(value) is not expected:
+        return False
+    if type(value) is Decimal:
+        return value.is_finite()
+    if type(value) is datetime:
+        return value.tzinfo is not None
+    if is_dataclass(value) and not isinstance(value, type):
+        hints = get_type_hints(type(value))
+        return all(typed(getattr(value, f.name), hints[f.name], depth + 1) for f in fields(value))
+    return True
 
 
 def safe_json(value: object, depth: int = 0) -> None:
@@ -34,7 +90,8 @@ def safe_json(value: object, depth: int = 0) -> None:
             safe_json(item, depth + 1)
     elif type(value) is str:
         if re.search(
-            r"(?i)(?:" + "|".join(re.escape(k) for k in SENSITIVE_KEYS) + r')[\s"\x27]*[:=]', value
+            r"(?i)(?:" + "|".join(re.escape(k) for k in SENSITIVE_KEYS) + r')[\s"\x27]*[:=]',
+            value,
         ):
             raise EvidenceError("CREDENTIAL_MATERIAL_DETECTED")
     elif value is not None and type(value) not in (bool, int):
@@ -94,229 +151,3 @@ def verify_record(value: object, expected: type[object]) -> bool:
         return True
     except (AttributeError, TypeError, ValueError, ValidationError, RecursionError):
         return False
-
-
-def decimal_field(value: object) -> Decimal:
-    if type(value) is not str:
-        raise EvidenceError("INVALID_DECIMAL")
-    try:
-        result = Decimal(value)
-    except InvalidOperation:
-        raise EvidenceError("INVALID_DECIMAL") from None
-    if not result.is_finite() or result < 0:
-        raise EvidenceError("INVALID_DECIMAL")
-    return result
-
-
-def timestamp(value: object) -> datetime:
-    if type(value) is not int or value < 0:
-        raise EvidenceError("INVALID_TIME")
-    try:
-        return datetime(1970, 1, 1, tzinfo=UTC) + timedelta(milliseconds=value)
-    except OverflowError:
-        raise EvidenceError("INVALID_TIME") from None
-
-
-class ExchangeOrderStatus(StrEnum):
-    NEW = "NEW"
-    PARTIALLY_FILLED = "PARTIALLY_FILLED"
-    FILLED = "FILLED"
-    CANCELED = "CANCELED"
-    PENDING_CANCEL = "PENDING_CANCEL"
-    REJECTED = "REJECTED"
-    EXPIRED = "EXPIRED"
-    EXPIRED_IN_MATCH = "EXPIRED_IN_MATCH"
-    UNKNOWN = "UNKNOWN"
-
-
-@dataclass(frozen=True, slots=True)
-class ReconciliationLookup(EvidenceRecord):
-    symbol: str
-    client_order_id: str | None = None
-    exchange_order_id: int | None = None
-    environment: str = "TESTNET"
-
-    def parameters(self) -> tuple[tuple[str, str], ...]:
-        if (
-            not verify_record(self, ReconciliationLookup)
-            or self.environment != "TESTNET"
-            or not re.fullmatch(r"[A-Z0-9]{2,30}", self.symbol)
-            or (self.client_order_id is None) == (self.exchange_order_id is None)
-            or (
-                self.client_order_id is not None
-                and not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", self.client_order_id)
-            )
-            or (self.exchange_order_id is not None and self.exchange_order_id < 0)
-        ):
-            raise EvidenceError("INVALID_LOOKUP")
-        key, value = (
-            ("origClientOrderId", self.client_order_id)
-            if self.client_order_id is not None
-            else ("orderId", str(self.exchange_order_id))
-        )
-        return (("symbol", self.symbol), (key, value))
-
-
-@dataclass(frozen=True, slots=True)
-class ExchangeFill(EvidenceRecord):
-    exchange_order_id: int
-    client_order_id: str
-    trade_id: int
-    symbol: str
-    price: Decimal
-    quantity: Decimal
-    quote_quantity: Decimal | None
-    execution_time: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class ExchangeOrderSnapshot(EvidenceRecord):
-    exchange_order_id: int
-    client_order_id: str
-    symbol: str
-    status: ExchangeOrderStatus
-    side: str
-    order_type: str
-    quantity: Decimal
-    executed_quantity: Decimal
-    effective_at: datetime
-    fills: tuple[ExchangeFill, ...]
-    source_identity: ContentIdentity
-
-
-@dataclass(frozen=True, slots=True)
-class ReconciliationResult(EvidenceRecord):
-    status: str
-    reason_code: str
-    snapshot: ExchangeOrderSnapshot | None = None
-    safe_to_retry: bool = False
-    side_effect_performed: bool = False
-
-
-def parse_reconciliation(lookup: object, order: object, trades: object) -> ReconciliationResult:
-    """Inspect injected GET order/account-trades payloads; never sends a lookup."""
-    try:
-        if not verify_record(lookup, ReconciliationLookup):
-            raise EvidenceError("INVALID_LOOKUP")
-        assert isinstance(lookup, ReconciliationLookup)
-        lookup.parameters()
-        safe_json(order)
-        safe_json(trades)
-        if type(order) is not dict or type(trades) is not list:
-            raise EvidenceError("MALFORMED_RESPONSE")
-        oid, cid, symbol = order.get("orderId"), order.get("clientOrderId"), order.get("symbol")
-        if (
-            type(oid) is not int
-            or oid < 0
-            or type(cid) is not str
-            or not cid
-            or symbol != lookup.symbol
-            or (lookup.exchange_order_id is not None and oid != lookup.exchange_order_id)
-            or (lookup.client_order_id is not None and cid != lookup.client_order_id)
-        ):
-            raise EvidenceError("LOOKUP_MISMATCH")
-        raw_status = order.get("status")
-        if type(raw_status) is not str or not raw_status:
-            raise EvidenceError("MALFORMED_RESPONSE")
-        status = (
-            ExchangeOrderStatus(raw_status)
-            if raw_status in ExchangeOrderStatus._value2member_map_
-            else ExchangeOrderStatus.UNKNOWN
-        )
-        qty, executed = decimal_field(order.get("origQty")), decimal_field(order.get("executedQty"))
-        if (
-            qty <= 0
-            or executed > qty
-            or order.get("side") not in ("BUY", "SELL")
-            or order.get("type") != "MARKET"
-        ):
-            raise EvidenceError("MALFORMED_RESPONSE")
-        at = timestamp(order.get("updateTime"))
-        fills = []
-        seen = set()
-        for trade in trades:
-            if type(trade) is not dict:
-                raise EvidenceError("MALFORMED_RESPONSE")
-            tid = trade.get("id")
-            if (
-                type(tid) is not int
-                or tid < 0
-                or tid in seen
-                or trade.get("orderId") != oid
-                or type(trade.get("orderId")) is not int
-                or trade.get("symbol") != symbol
-            ):
-                raise EvidenceError("MALFORMED_RESPONSE")
-            seen.add(tid)
-            price, quantity = decimal_field(trade.get("price")), decimal_field(trade.get("qty"))
-            when = timestamp(trade.get("time"))
-            if price <= 0 or quantity <= 0 or when > at:
-                raise EvidenceError("MALFORMED_RESPONSE")
-            fills.append(
-                ExchangeFill(
-                    oid,
-                    cid,
-                    tid,
-                    symbol,
-                    price,
-                    quantity,
-                    decimal_field(trade["quoteQty"]) if "quoteQty" in trade else None,
-                    when,
-                )
-            )
-        if sum((Fraction(f.quantity) for f in fills), Fraction(0)) > Fraction(executed):
-            raise EvidenceError("MALFORMED_RESPONSE")
-        snapshot = ExchangeOrderSnapshot(
-            oid,
-            cid,
-            symbol,
-            status,
-            order["side"],
-            order["type"],
-            qty,
-            executed,
-            at,
-            tuple(sorted(fills, key=lambda f: (f.execution_time, f.trade_id))),
-            ContentIdentity.from_bytes(canonical_json_bytes({"order": order, "trades": trades})),
-        )
-        return ReconciliationResult(
-            "BLOCKED" if status is ExchangeOrderStatus.UNKNOWN else "PASSED",
-            "AMBIGUOUS_SUBMISSION_STATE"
-            if status is ExchangeOrderStatus.UNKNOWN
-            else "RECONCILIATION_ESTABLISHED",
-            snapshot,
-        )
-    except (EvidenceError, KeyError, TypeError, ValueError, ValidationError):
-        return ReconciliationResult("BLOCKED", "RESPONSE_MAPPING_INVALID")
-
-
-@dataclass(frozen=True, slots=True)
-class ReadOnlyQuery(EvidenceRecord):
-    path: str
-    parameters: tuple[tuple[str, str], ...]
-    method: str = "GET"
-    venue: str = "BINANCE_SPOT_TESTNET"
-    submission_authorized: bool = False
-
-
-def reconciliation_order_query(lookup: object) -> ReadOnlyQuery | None:
-    if not verify_record(lookup, ReconciliationLookup):
-        return None
-    assert isinstance(lookup, ReconciliationLookup)
-    try:
-        return ReadOnlyQuery("/api/v3/order", lookup.parameters())
-    except EvidenceError:
-        return None
-
-
-def reconciliation_fills_query(lookup: object) -> ReadOnlyQuery | None:
-    if not verify_record(lookup, ReconciliationLookup):
-        return None
-    assert isinstance(lookup, ReconciliationLookup)
-    # Trades require the established order ID: resolve a client lookup first.
-    if lookup.exchange_order_id is None:
-        return None
-    try:
-        return ReadOnlyQuery("/api/v3/myTrades", lookup.parameters())
-    except EvidenceError:
-        return None

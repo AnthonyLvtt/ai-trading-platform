@@ -73,7 +73,7 @@ def snapshot(
     opens = ("3", "3", "2", "1", "4.5", "5.5", "0.5")
     points = tuple(
         DataPoint.from_value(
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
             value=(payloads or {}).get(index, {"close": close, "open": opens[index]}),
             temporal=TemporalMetadata(
                 event_time=START + timedelta(minutes=index),
@@ -89,7 +89,7 @@ def snapshot(
         for index, close in enumerate(closes)
     )
     return DatasetSnapshot.create(
-        dataset_id=DatasetId("btc-usdt-1m:v1"),
+        dataset_id=DatasetId("btc-eur-1m:v1"),
         snapshot_id=SnapshotId("snapshot:bt:v1"),
         source_id=SourceId("historical-fixture"),
         environment=Environment.BACKTEST,
@@ -111,9 +111,9 @@ def universe(data: DatasetSnapshot) -> UniverseSnapshot:
         universe_snapshot_id=UniverseSnapshotId("universe:bt:v1"),
         created_at=START,
         effective_at=START,
-        rules_version="spot-usdt-v1",
+        rules_version="spot-eur-v1",
         source_snapshot_ids=(data.snapshot_id,),
-        decisions=(SymbolDecision("BTCUSDT", True, "eligible fixture", START),),
+        decisions=(SymbolDecision("BTC/EUR", True, "eligible fixture", START),),
     )
 
 
@@ -128,7 +128,7 @@ def strategy_evaluation(data: DatasetSnapshot, index: int) -> StrategyEvaluation
             snapshot=data,
             universe=universe(data),
             evaluation_time=LogicalTime(START + timedelta(minutes=index)),
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
         )
     )
 
@@ -143,7 +143,7 @@ def risk_result(
         RiskEvaluationContext(
             strategy_evaluation=evaluation,
             market_context=RiskMarketContext(
-                symbol="BTCUSDT",
+                symbol="BTC/EUR",
                 market_type=MarketType.SPOT,
                 position_direction=PositionDirection.LONG,
                 margin_enabled=False,
@@ -163,7 +163,7 @@ def empty_portfolio() -> PortfolioState:
 def open_portfolio() -> PortfolioState:
     return PortfolioState.create(
         PortfolioKnowledgeStatus.KNOWN_OPEN,
-        (OpenPosition(PositionId("position:btc"), "BTCUSDT", PositionSide.LONG),),
+        (OpenPosition(PositionId("position:btc"), "BTC/EUR", PositionSide.LONG),),
     )
 
 
@@ -201,7 +201,7 @@ def test_long_entry_fills_only_at_next_bar_open_deterministically() -> None:
     assert result.fill.fill_price == Decimal("4.5")
     assert result.fill.source_bar_identity == data.points[4].content_identity
     assert result.fill.fill_time == data.points[4].temporal.available_at
-    assert result.position_after == SimulatedPositionState.open_long("BTCUSDT")
+    assert result.position_after == SimulatedPositionState.open_long("BTC/EUR")
 
 
 def test_exit_fills_next_bar_and_returns_to_empty() -> None:

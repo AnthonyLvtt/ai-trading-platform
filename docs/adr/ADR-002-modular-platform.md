@@ -77,7 +77,7 @@ Responsable du cycle de vie des intentions d’ordre et des exécutions reconnue
 
 Seule frontière d’intégration avec l’Exchange pour les opérations externes autorisées.
 
-Binance est l’adapter initial, mais Binance ne fait pas partie du cœur métier de la plateforme.
+Kraken est l’unique adapter V1, sans faire partie du cœur métier de la plateforme.
 
 ### Portfolio & Accounting
 
@@ -117,8 +117,8 @@ AI/ML ne communique pas directement avec l’Exchange Adapter pour placer des or
 - séparation explicite des responsabilités ;
 - Risk déterministe et indépendant ;
 - AI/ML sans accès direct Exchange ;
-- Binance limité à l’Exchange Adapter ;
-- simulation, Testnet et réel distingués ;
+- Kraken limité à l’Exchange Adapter ;
+- simulation et réel distingués ;
 - chemins critiques fail-closed selon les SPEC applicables ;
 - pas de services distribués prématurés.
 
@@ -160,7 +160,7 @@ Cette décision permet :
 - des frontières compatibles avec une évolution future ;
 - une réduction de la complexité distribuée ;
 - une séparation claire des autorités métier ;
-- l’utilisation d’un adapter Binance sans coupler le cœur métier à Binance.
+- l’utilisation d’un adapter Kraken sans coupler le cœur métier à Kraken.
 
 ## 9. Invariants
 

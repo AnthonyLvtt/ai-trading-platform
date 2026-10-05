@@ -429,7 +429,7 @@ def _valid_accounting_input(value: object) -> bool:
             not isinstance(value.initial_cash, Decimal)
             or not value.initial_cash.is_finite()
             or value.initial_cash < 0
-            or value.currency != "USDT"
+            or value.currency != "EUR"
             or not isinstance(value.executions, tuple)
         ):
             return False

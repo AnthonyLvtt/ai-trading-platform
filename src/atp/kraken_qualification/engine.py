@@ -1,4 +1,4 @@
-"""Fail-closed Kraken public qualification, independent from Binance TQ."""
+"""Fail-closed Kraken public qualification."""
 
 from collections.abc import Callable
 from dataclasses import dataclass

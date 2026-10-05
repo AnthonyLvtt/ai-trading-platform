@@ -51,6 +51,6 @@ Risk depends on accepted Shared and Strategy contracts only. Runtime evidence is
 
 - Position sizing, capital allocation, notional values, fees, stop-loss, and take-profit.
 - Portfolio and Accounting mutation.
-- OMS, orders, Exchange adapters, and Binance integration.
+- OMS, orders, Exchange adapters, and Kraken integration.
 - Concrete persistence and asynchronous transport.
 - AI/ML, optimization, Web/UI, and Live trading.

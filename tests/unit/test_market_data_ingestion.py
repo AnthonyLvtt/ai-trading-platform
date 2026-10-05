@@ -15,7 +15,7 @@ from atp.data.market_data import (
     KRAKEN_CANDLE_TRANSFORMATION_VERSION,
     ingest_closed_public_candles,
 )
-from atp.exchange.contracts import BTC_EUR, BTC_USDT, VenueId
+from atp.exchange.contracts import BTC_EUR, CanonicalInstrumentId, VenueId
 from atp.exchange.kraken import parse_closed_ohlc
 from atp.exchange.read_only import EvidenceError
 from atp.shared.environment import Environment
@@ -121,10 +121,9 @@ def test_foreign_venue_instrument_or_mapping_fails_closed() -> None:
         interval_minutes=5,
         environment=Environment.TEST,
     )
+    eth_eur = CanonicalInstrumentId("ETH", "EUR")
     for changes in (
-        {"selected_venue": VenueId.BINANCE},
-        {"instrument": BTC_USDT},
-        {"mapping": replace(mapping, venue=VenueId.BINANCE)},
+        {"instrument": eth_eur},
         {"interval_minutes": 1},
     ):
         with pytest.raises(EvidenceError, match="KRAKEN_CANDLE_INGESTION_INVALID"):
@@ -156,21 +155,6 @@ def test_malformed_or_stale_batches_fail_closed(change: str) -> None:
             interval_minutes=5,
             environment=Environment.TEST,
         )
-
-
-def test_existing_binance_data_identity_semantics_remain_unchanged() -> None:
-    from atp.data import DataPoint, TemporalMetadata
-
-    point = DataPoint.from_value(
-        symbol="BTCUSDT",
-        value={"close": "100.00"},
-        temporal=TemporalMetadata(AT, AT, AT, AT),
-        finality=DataFinality.FINAL,
-    )
-    assert (
-        str(point.content_identity)
-        == "sha256:09e7eeb5022c793ce2c857854960d79f107c5c8cce0ca5b7b27f4603811bcb18"
-    )
 
 
 def test_existing_fixture_is_not_modified() -> None:

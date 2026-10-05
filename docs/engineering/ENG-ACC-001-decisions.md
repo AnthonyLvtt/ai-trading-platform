@@ -11,7 +11,7 @@ The CTO decision `ENG-ACC-001 V1 SIMULATED ACCOUNTING POLICY` is the normative s
 ## Policy V1
 
 - policy: `ATP_ACCOUNTING_V1`, version `1.0`;
-- currency and quote asset: USDT;
+- currency and quote asset: EUR;
 - Spot, long-only, one position;
 - external quantity fact;
 - single-entry cost basis;

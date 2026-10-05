@@ -41,7 +41,7 @@ Only a minimal repository Protocol is introduced. No database, distributed log, 
 - DATA implementation and storage technology selection beyond adapter boundaries.
 - Strategy/Risk/OMS/Accounting business logic.
 - Backtest engine.
-- Binance adapter behavior.
+- Kraken adapter behavior.
 - Web UI.
 - full observability infrastructure.
 - Deployment automation.

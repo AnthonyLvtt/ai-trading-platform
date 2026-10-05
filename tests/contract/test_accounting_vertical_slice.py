@@ -25,7 +25,7 @@ START = datetime(2026, 1, 1, tzinfo=UTC)
 def simulated_fill(*, side: SimulatedOrderSide, minute: int, price: str) -> SimulatedFill:
     token = ContentIdentity.from_text(f"contract:{side.value}:{minute}")
     provenance = ExecutionProvenance(
-        dataset_id=DatasetId("btc-usdt-1m:v1"),
+        dataset_id=DatasetId("btc-eur-1m:v1"),
         snapshot_id=SnapshotId("snapshot:accounting-contract:v1"),
         snapshot_identity=ContentIdentity.from_text("snapshot"),
         evaluation_bar_identity=ContentIdentity.from_text(f"bar:{minute - 1}"),
@@ -42,7 +42,7 @@ def simulated_fill(*, side: SimulatedOrderSide, minute: int, price: str) -> Simu
         simulation_policy_id=SimulationPolicyId("ATP_SIM_EXEC_V1"),
         simulation_policy_version="1.0",
         simulation_policy_identity=ContentIdentity.from_text("simulation-policy"),
-        symbol="BTCUSDT",
+        symbol="BTC/EUR",
     )
     order = SimulatedOrder.create(
         side=side,
@@ -65,7 +65,7 @@ def test_simulated_fill_to_accounting_result_vertical_slice() -> None:
     result = AccountingEngine().replay(
         AccountingReplayInput(
             initial_cash=Decimal("100"),
-            currency="USDT",
+            currency="EUR",
             executions=(
                 AccountingExecution(entry, Decimal("2")),
                 AccountingExecution(exit_fill, Decimal("2")),

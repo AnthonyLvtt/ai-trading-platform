@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from atp.exchange.contracts import BTC_EUR, BTC_USDT, VenueId
+from atp.exchange.contracts import BTC_EUR, CanonicalInstrumentId, VenueId
 from atp.exchange.kraken import (
     KRAKEN_PUBLIC_ROUTE_ALLOWLIST,
     KrakenPublicClient,
@@ -90,8 +90,9 @@ def test_unknown_fields_errors_and_foreign_mappings_fail_closed() -> None:
     with pytest.raises(EvidenceError, match="KRAKEN_ENVELOPE_INVALID"):
         parse_server_time(errored, AT)
     mapping, _ = evidence()
+    eth_eur = CanonicalInstrumentId("ETH", "EUR")
     with pytest.raises(EvidenceError, match="FOREIGN_MAPPING"):
-        parse_ticker_price(fixture("ticker.json"), BTC_USDT, mapping, AT)
+        parse_ticker_price(fixture("ticker.json"), eth_eur, mapping, AT)
 
 
 def test_public_client_uses_only_closed_allowlist_and_exact_mapping() -> None:

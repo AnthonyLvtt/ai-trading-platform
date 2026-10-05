@@ -20,4 +20,4 @@ make validate
 - Preserve module authority boundaries from the Accepted SPECs.
 - Shared primitives are technical only; domain state machines remain domain-owned.
 - Do not add abstractions without a concrete use in the V1 vertical slice.
-- No Live activation, Binance credentials, withdrawal capability, leverage, margin, Futures, or shorting belongs in foundation work.
+- No Live activation, economic exchange credentials, withdrawal capability, leverage, margin, Futures, or shorting belongs in foundation work.

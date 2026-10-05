@@ -36,7 +36,7 @@ def test_validated_data_to_deterministic_strategy_signal_vertical_slice() -> Non
     closes = ("3", "2", "1", "4")
     points = tuple(
         DataPoint.from_value(
-            symbol="BTCUSDT",
+            symbol="BTC/EUR",
             value={"close": close},
             temporal=TemporalMetadata(
                 event_time=start + timedelta(minutes=index),
@@ -49,7 +49,7 @@ def test_validated_data_to_deterministic_strategy_signal_vertical_slice() -> Non
         for index, close in enumerate(closes)
     )
     data = DatasetSnapshot.create(
-        dataset_id=DatasetId("btc-usdt-1m:v1"),
+        dataset_id=DatasetId("btc-eur-1m:v1"),
         snapshot_id=SnapshotId("snapshot:strategy-contract:v1"),
         source_id=SourceId("historical-contract-fixture"),
         environment=Environment.BACKTEST,
@@ -68,9 +68,9 @@ def test_validated_data_to_deterministic_strategy_signal_vertical_slice() -> Non
         universe_snapshot_id=UniverseSnapshotId("universe:strategy-contract:v1"),
         created_at=start,
         effective_at=start,
-        rules_version="spot-usdt-v1",
+        rules_version="spot-eur-v1",
         source_snapshot_ids=(data.snapshot_id,),
-        decisions=(SymbolDecision("BTCUSDT", True, "eligible fixture", start),),
+        decisions=(SymbolDecision("BTC/EUR", True, "eligible fixture", start),),
     )
     evaluator = SmaCrossoverStrategy(
         strategy_id=StrategyId("sma-crossover"),
@@ -82,7 +82,7 @@ def test_validated_data_to_deterministic_strategy_signal_vertical_slice() -> Non
         snapshot=data,
         universe=market_universe,
         evaluation_time=LogicalTime(start + timedelta(minutes=3)),
-        symbol="BTCUSDT",
+        symbol="BTC/EUR",
     )
 
     first = evaluator.evaluate(context)
