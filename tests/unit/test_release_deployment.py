@@ -211,7 +211,7 @@ def test_promotion_matrix(inputs, target):
     result = promote(bundle, inputs[4], target)
     reasons = {
         Target.LIVE: Reason.LIVE_FORBIDDEN,
-        Target.TESTNET: Reason.ACTIVATION_GRANT_REQUIRED,
+        Target.TESTNET: Reason.PROMOTION_TARGET_FORBIDDEN,
         Target.DRY_RUN: Reason.PROMOTION_TARGET_FORBIDDEN,
     }
     assert result.reason_code is reasons.get(target, Reason.PROMOTION_ALLOWED)
