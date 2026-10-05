@@ -76,7 +76,7 @@ def test_authorized_modes_are_ready(workspace, environment):
     "environment,reason",
     [
         ("LIVE", Reason.LIVE_FORBIDDEN),
-        ("TESTNET", Reason.ACTIVATION_GRANT_REQUIRED),
+        ("TESTNET", Reason.TESTNET_NOT_AUTHORIZED),
         ("DRY_RUN", Reason.ENVIRONMENT_INACTIVE),
         ("unknown", Reason.UNKNOWN_ENVIRONMENT),
     ],
