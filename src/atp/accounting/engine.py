@@ -103,7 +103,7 @@ class AccountingEngine:
                         tuple(ledger),
                     )
                 next_state = AccountingState(
-                    "USDT",
+                    "EUR",
                     state.cash - cost,
                     AccountingPosition.open_long(
                         symbol=fill.symbol,
@@ -144,7 +144,7 @@ class AccountingEngine:
                 proceeds = fill.fill_price * execution.quantity
                 pnl_delta = (fill.fill_price - position.average_entry_price) * execution.quantity
                 next_state = AccountingState(
-                    "USDT",
+                    "EUR",
                     state.cash + proceeds,
                     AccountingPosition.empty(),
                     state.cumulative_realized_pnl + pnl_delta,
@@ -277,7 +277,7 @@ def _validate_replay_input(value: object) -> AccountingReasonCode | None:
     if not isinstance(value, AccountingReplayInput):
         return AccountingReasonCode.INVALID_ACCOUNTING_INPUT
     if (
-        value.currency != "USDT"
+        value.currency != "EUR"
         or not isinstance(value.initial_cash, Decimal)
         or not value.initial_cash.is_finite()
         or value.initial_cash < 0
@@ -438,7 +438,7 @@ def _valid_replay_result(
         or not value.initial_cash.is_finite()
         or value.initial_cash < 0
         or not isinstance(state, AccountingState)
-        or state.currency != "USDT"
+        or state.currency != "EUR"
         or not isinstance(state.cash, Decimal)
         or not state.cash.is_finite()
         or state.cash < 0
@@ -537,7 +537,7 @@ def _ledger_matches_result(value: AccountingReplayResult, policy: AccountingPoli
         ):
             return False
         state = AccountingState(
-            currency="USDT",
+            currency="EUR",
             cash=state.cash + expected_cash_delta,
             position=next_position,
             cumulative_realized_pnl=state.cumulative_realized_pnl + expected_pnl_delta,
