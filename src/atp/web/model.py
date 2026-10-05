@@ -118,7 +118,7 @@ class AccountingSummaryView(View):
     source: Literal["VALUATION", "REPLAY"]
     accounting_status: str
     reason_code: str | None
-    currency: Literal["USDT"]
+    currency: Literal["EUR"]
     cash: str
     cumulative_realized_pnl: str
     unrealized_pnl: str | None = None
