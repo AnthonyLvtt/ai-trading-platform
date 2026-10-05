@@ -109,11 +109,11 @@ class AccountingState:
 
     @classmethod
     def initial(cls, initial_cash: Decimal) -> AccountingState:
-        return cls("USDT", initial_cash, AccountingPosition.empty(), Decimal("0"), None)
+        return cls("EUR", initial_cash, AccountingPosition.empty(), Decimal("0"), None)
 
     def __post_init__(self) -> None:
-        if self.currency != "USDT":
-            raise ValidationError("Accounting V1 currency must be USDT")
+        if self.currency != "EUR":
+            raise ValidationError("Accounting V1 currency must be EUR")
         for name, value in (
             ("cash", self.cash),
             ("cumulative_realized_pnl", self.cumulative_realized_pnl),
