@@ -65,7 +65,7 @@ def test_simulated_fill_to_accounting_result_vertical_slice() -> None:
     result = AccountingEngine().replay(
         AccountingReplayInput(
             initial_cash=Decimal("100"),
-            currency="USDT",
+            currency="EUR",
             executions=(
                 AccountingExecution(entry, Decimal("2")),
                 AccountingExecution(exit_fill, Decimal("2")),
