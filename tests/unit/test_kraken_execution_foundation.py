@@ -31,6 +31,7 @@ from atp.risk.model import (
 )
 from atp.risk.policy import RiskPolicy
 from atp.shared.environment import Environment
+from atp.shared.identity import ContentIdentity
 from atp.strategy.model import SignalKind
 from tests.unit.test_strategy_baseline import context, snapshot, strategy
 
@@ -87,6 +88,18 @@ def test_buy_intent_requires_exact_strategy_and_approved_risk_binding() -> None:
     )
     assert intent.instrument == BTC_EUR
     assert intent.idempotency_key == duplicate.idempotency_key
+
+
+def test_exit_signal_builds_sell_intent() -> None:
+    evaluation, decision = approved(SignalKind.EXIT)
+    intent = OrderIntent.create(
+        strategy_evaluation=evaluation,
+        risk_decision=decision,
+        side=OrderSide.SELL,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.001"),
+    )
+    assert intent.side is OrderSide.SELL
 
 
 def test_side_and_order_fields_fail_closed() -> None:
@@ -192,3 +205,21 @@ def test_economic_transport_is_disabled_and_has_no_network_surface() -> None:
             assert all(not alias.name.startswith(forbidden) for alias in node.names)
         if isinstance(node, ast.ImportFrom) and node.module:
             assert not node.module.startswith(forbidden)
+
+
+def test_tampered_intent_is_rejected_at_consumption_boundary() -> None:
+    evaluation, decision = approved(SignalKind.LONG_ENTRY)
+    intent = OrderIntent.create(
+        strategy_evaluation=evaluation,
+        risk_decision=decision,
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.001"),
+    )
+    object.__setattr__(
+        intent,
+        "risk_decision_identity",
+        ContentIdentity.from_text("tampered-risk-decision"),
+    )
+    with pytest.raises(ExecutionError, match="EXECUTION_INTENT_INVALID"):
+        DisabledKrakenEconomicTransport().submit(intent)
