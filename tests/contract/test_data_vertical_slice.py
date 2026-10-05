@@ -28,7 +28,7 @@ def test_historical_input_to_consumable_data_vertical_slice() -> None:
     event_time = datetime(2026, 1, 1, tzinfo=UTC)
     available_at = event_time + timedelta(seconds=2)
     point = DataPoint.from_value(
-        symbol="BTCUSDT",
+        symbol="BTC/EUR",
         value={"close": "100.00", "volume": "2.5"},
         temporal=TemporalMetadata(
             event_time=event_time,
@@ -39,8 +39,8 @@ def test_historical_input_to_consumable_data_vertical_slice() -> None:
         finality=DataFinality.FINAL,
     )
     snapshot = DatasetSnapshot.create(
-        dataset_id=DatasetId("btc-usdt-1m:2026-01:v1"),
-        snapshot_id=SnapshotId("btc-usdt-1m:2026-01:materialization-1"),
+        dataset_id=DatasetId("btc-eur-1m:2026-01:v1"),
+        snapshot_id=SnapshotId("btc-eur-1m:2026-01:materialization-1"),
         source_id=SourceId("historical-contract-fixture"),
         environment=Environment.BACKTEST,
         schema_version="candle-v1",
@@ -62,7 +62,7 @@ def test_historical_input_to_consumable_data_vertical_slice() -> None:
         source_snapshot_ids=(snapshot.snapshot_id,),
         decisions=(
             SymbolDecision(
-                symbol="BTCUSDT",
+                symbol="BTC/EUR",
                 eligible=True,
                 reason="historical DATA eligibility demonstrated",
                 evidence_available_at=available_at,
@@ -91,7 +91,7 @@ def test_historical_input_to_consumable_data_vertical_slice() -> None:
 def test_historical_replay_preserves_validation_known_at_original_use() -> None:
     event_time = datetime(2026, 1, 1, tzinfo=UTC)
     point = DataPoint.from_value(
-        symbol="BTCUSDT",
+        symbol="BTC/EUR",
         value={"close": "100.00"},
         temporal=TemporalMetadata(
             event_time=event_time,
@@ -102,7 +102,7 @@ def test_historical_replay_preserves_validation_known_at_original_use() -> None:
         finality=DataFinality.FINAL,
     )
     used_snapshot = DatasetSnapshot.create(
-        dataset_id=DatasetId("btc-usdt-1m:2026-01:v1"),
+        dataset_id=DatasetId("btc-eur-1m:2026-01:v1"),
         snapshot_id=SnapshotId("snapshot-used-before-late-invalidation"),
         source_id=SourceId("historical-contract-fixture"),
         environment=Environment.BACKTEST,
@@ -124,7 +124,7 @@ def test_historical_replay_preserves_validation_known_at_original_use() -> None:
         effective_at=event_time,
         rules_version="spot-usdt-v1",
         source_snapshot_ids=(used_snapshot.snapshot_id,),
-        decisions=(SymbolDecision("BTCUSDT", True, "historically eligible", event_time),),
+        decisions=(SymbolDecision("BTC/EUR", True, "historically eligible", event_time),),
     )
     contract = ConsumerContract(
         accepted_quality=frozenset({DataQuality.VALID}),
