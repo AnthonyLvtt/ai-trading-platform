@@ -79,7 +79,12 @@ class ExposureFreshnessPolicy(EvidenceRecord):
             self.maximum_bundle_skew_seconds,
         )
         if (
-            any(type(value) is not Decimal or not value.is_finite() or value <= 0 for value in values)
+            any(
+                type(value) is not Decimal
+                or not value.is_finite()
+                or value <= 0
+                for value in values
+            )
             or self.policy_version != "1.0.0"
             or self.live != "LIVE_FORBIDDEN"
         ):
