@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 import scripts.qualify_kraken_exposure as module
+from atp.exchange.contracts import VenueId
 from atp.kraken_private_qualification.exposure_gate import account_identity_from_iiban
 from atp.kraken_private_qualification.exposure_gate_model import (
     ExposureGateReason,
@@ -22,9 +24,7 @@ def result() -> ExposureGateResult:
     return ExposureGateResult(
         status=ExposureGateStatus.PASSED,
         reason_code=ExposureGateReason.QUALIFIED,
-        venue=module.VenueId.KRAKEN if hasattr(module, "VenueId") else __import__(
-            "atp.exchange.contracts", fromlist=["VenueId"]
-        ).VenueId.KRAKEN,
+        venue=VenueId.KRAKEN,
         account_identity=account_identity_from_iiban(IIBAN),
         credential_reference_identity=ContentIdentity.from_text("credential"),
         capability_identity=ContentIdentity.from_text("capability"),
@@ -35,10 +35,8 @@ def result() -> ExposureGateResult:
             "/0/private/TradeVolume",
         ),
         total_private_network_calls=3,
-        started_at=__import__("datetime").datetime(2026, 10, 7, tzinfo=__import__("datetime").UTC),
-        completed_at=__import__("datetime").datetime(
-            2026, 10, 7, 0, 0, 3, tzinfo=__import__("datetime").UTC
-        ),
+        started_at=datetime(2026, 10, 7, tzinfo=UTC),
+        completed_at=datetime(2026, 10, 7, 0, 0, 3, tzinfo=UTC),
         source_commit_sha=SHA,
         source_tree_sha="b" * 40,
         repository_identity=ContentIdentity.from_text("repo"),
