@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-import scripts.qualify_kraken_exposure as module
 from atp.exchange.contracts import VenueId
 from atp.kraken_private_qualification.exposure_gate import account_identity_from_iiban
 from atp.kraken_private_qualification.exposure_gate_model import (
@@ -15,6 +14,7 @@ from atp.kraken_private_qualification.exposure_gate_model import (
     ExposureGateStatus,
 )
 from atp.shared.identity import ContentIdentity
+import scripts.qualify_kraken_exposure as module
 
 SHA = "a" * 40
 IIBAN = "TEST-IIBAN-NEVER-PERSISTED"
