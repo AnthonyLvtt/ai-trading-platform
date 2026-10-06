@@ -18,15 +18,16 @@ from atp.oms.exposure_qualification import (
 
 def test_source_registry_qualifies_existing_reads_but_keeps_missing_sources_closed() -> None:
     by_kind = {source.kind: source for source in EXPOSURE_SOURCE_REGISTRY}
-    assert by_kind[ExposureSourceKind.ACCOUNT_BALANCE].runtime_authorized is True
-    assert by_kind[ExposureSourceKind.ACCOUNT_OPEN_ORDERS].runtime_authorized is True
-    assert by_kind[ExposureSourceKind.VALUATION_PRICE].runtime_authorized is True
+    assert by_kind[ExposureSourceKind.ACCOUNT_BALANCE].exposure_source_qualified is True
+    assert by_kind[ExposureSourceKind.ACCOUNT_OPEN_ORDERS].exposure_source_qualified is True
+    assert by_kind[ExposureSourceKind.VALUATION_PRICE].exposure_source_qualified is True
     assert SPENDABLE_EUR_SOURCE.route == "/0/private/BalanceEx"
-    assert SPENDABLE_EUR_SOURCE.runtime_authorized is False
+    assert SPENDABLE_EUR_SOURCE.exposure_source_qualified is False
     assert SPENDABLE_EUR_SOURCE.observation_qualified is False
     assert BOUNDED_FEE_SOURCE.route is None
-    assert BOUNDED_FEE_SOURCE.runtime_authorized is False
+    assert BOUNDED_FEE_SOURCE.exposure_source_qualified is False
     assert BOUNDED_FEE_SOURCE.observation_qualified is False
+    assert all(source.network_authority_granted is False for source in EXPOSURE_SOURCE_REGISTRY)
 
 
 def test_freshness_policy_is_exact_and_fail_closed() -> None:
@@ -55,6 +56,8 @@ def test_runtime_pass_remains_unqualified_until_both_blocking_sources_are_qualif
     assert result.live == "LIVE_FORBIDDEN"
 
 
-def test_source_contract_cannot_claim_runtime_authority_without_observation_qualification() -> None:
+def test_source_contract_cannot_claim_qualification_or_network_authority() -> None:
     with pytest.raises(ExposureQualificationError, match="EXPOSURE_SOURCE_CONTRACT_INVALID"):
-        replace(SPENDABLE_EUR_SOURCE, runtime_authorized=True)
+        replace(SPENDABLE_EUR_SOURCE, exposure_source_qualified=True)
+    with pytest.raises(ExposureQualificationError, match="EXPOSURE_SOURCE_CONTRACT_INVALID"):
+        replace(SPENDABLE_EUR_SOURCE, network_authority_granted=True)
