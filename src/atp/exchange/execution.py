@@ -15,8 +15,9 @@ from pathlib import Path
 
 from atp.exchange.contracts import BTC_EUR, CanonicalInstrumentId, MarketKind, VenueId
 from atp.risk.model import RiskDecision, RiskStatus
+from atp.shared.errors import ValidationError
 from atp.shared.identity import ContentIdentity
-from atp.strategy.model import SignalKind, StrategyEvaluation
+from atp.strategy.model import SignalKind, StrategyEvaluation, StrategySignal
 
 
 class ExecutionError(ValueError):
@@ -146,11 +147,20 @@ def _validate_binding(
     risk_decision: RiskDecision,
     side: OrderSide,
 ) -> None:
-    if type(strategy_evaluation) is not StrategyEvaluation:
+    if (
+        type(strategy_evaluation) is not StrategyEvaluation
+        or type(risk_decision) is not RiskDecision
+    ):
         raise ExecutionError("RISK_BINDING_INVALID")
-    signal = strategy_evaluation.signal
-    if signal is None or type(risk_decision) is not RiskDecision:
-        raise ExecutionError("RISK_BINDING_INVALID")
+    try:
+        strategy_evaluation.__post_init__()
+        signal = strategy_evaluation.signal
+        if type(signal) is not StrategySignal:
+            raise ExecutionError("RISK_BINDING_INVALID")
+        signal.__post_init__()
+        risk_decision.__post_init__()
+    except (AttributeError, TypeError, ValueError, ValidationError, RecursionError):
+        raise ExecutionError("RISK_BINDING_INVALID") from None
     if risk_decision.status is not RiskStatus.APPROVED:
         raise ExecutionError("RISK_BINDING_INVALID")
     provenance = risk_decision.provenance
