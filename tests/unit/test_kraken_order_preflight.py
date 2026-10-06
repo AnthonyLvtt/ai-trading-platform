@@ -58,14 +58,10 @@ def test_limit_preflight_is_deterministic_and_uses_qualified_native_mapping() ->
     mapping, metadata, _ = evidence()
     order = intent()
     first = KrakenOrderPreflight.build(
-        intent=order,
-        mapping=mapping,
-        metadata=metadata,
+        intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT
     )
     second = KrakenOrderPreflight.build(
-        intent=order,
-        mapping=mapping,
-        metadata=metadata,
+        intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT
     )
     payload = dict(first.payload)
     assert first.content_identity == second.content_identity
@@ -94,7 +90,9 @@ def test_market_preflight_requires_fresh_bound_price_for_notional_check() -> Non
     assert "price" not in dict(result.payload)
 
     with pytest.raises(ExecutionError, match="KRAKEN_MARKET_PRICE_REQUIRED"):
-        KrakenOrderPreflight.build(intent=order, mapping=mapping, metadata=metadata)
+        KrakenOrderPreflight.build(
+            intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT
+        )
 
     stale = replace(price, freshness="UNKNOWN", observation=None)
     with pytest.raises(ExecutionError, match="KRAKEN_PRICE_EVIDENCE_INVALID"):
@@ -112,11 +110,15 @@ def test_preflight_rejects_foreign_or_stale_mapping_metadata_binding() -> None:
     order = intent()
     offline = replace(mapping, instrument_status="cancel_only")
     with pytest.raises(ExecutionError, match="KRAKEN_MAPPING_NOT_AUTHORIZED"):
-        KrakenOrderPreflight.build(intent=order, mapping=offline, metadata=metadata)
+        KrakenOrderPreflight.build(
+            intent=order, mapping=offline, metadata=metadata, evaluated_at=AT
+        )
 
     detached = replace(metadata, mapping_identity=metadata.source_identity)
     with pytest.raises(ExecutionError, match="KRAKEN_METADATA_NOT_AUTHORIZED"):
-        KrakenOrderPreflight.build(intent=order, mapping=mapping, metadata=detached)
+        KrakenOrderPreflight.build(
+            intent=order, mapping=mapping, metadata=detached, evaluated_at=AT
+        )
 
 
 @pytest.mark.parametrize(
@@ -138,6 +140,7 @@ def test_preflight_enforces_public_metadata_constraints(
             intent=intent(quantity=quantity, price=price),
             mapping=mapping,
             metadata=metadata,
+            evaluated_at=AT,
         )
 
 
@@ -149,15 +152,14 @@ def test_minimum_notional_is_fail_closed() -> None:
             intent=intent(quantity=Decimal("0.001"), price=Decimal("95000.0")),
             mapping=mapping,
             metadata=strict,
+            evaluated_at=AT,
         )
 
 
 def test_tampered_preflight_fails_validation() -> None:
     mapping, metadata, _ = evidence()
     result = KrakenOrderPreflight.build(
-        intent=intent(),
-        mapping=mapping,
-        metadata=metadata,
+        intent=intent(), mapping=mapping, metadata=metadata, evaluated_at=AT
     )
     object.__setattr__(result, "client_order_id", "tampered")
     with pytest.raises(ExecutionError, match="KRAKEN_PREFLIGHT_INVALID"):
@@ -195,7 +197,9 @@ def test_every_identity_is_integrity_checked(field: str) -> None:
     from atp.shared.identity import ContentIdentity
 
     mapping, metadata, _ = evidence()
-    result = KrakenOrderPreflight.build(intent=intent(), mapping=mapping, metadata=metadata)
+    result = KrakenOrderPreflight.build(
+        intent=intent(), mapping=mapping, metadata=metadata, evaluated_at=AT
+    )
     object.__setattr__(result, field, ContentIdentity.from_text("altered"))
     with pytest.raises(ExecutionError, match="KRAKEN_PREFLIGHT_INVALID"):
         result.validate()
@@ -212,7 +216,9 @@ def test_every_identity_is_integrity_checked(field: str) -> None:
 )
 def test_valid_looking_payload_tampering_is_detected(key: str, value: str) -> None:
     mapping, metadata, _ = evidence()
-    result = KrakenOrderPreflight.build(intent=intent(), mapping=mapping, metadata=metadata)
+    result = KrakenOrderPreflight.build(
+        intent=intent(), mapping=mapping, metadata=metadata, evaluated_at=AT
+    )
     payload = dict(result.payload)
     payload[key] = value
     object.__setattr__(result, "payload", tuple(sorted(payload.items())))
@@ -224,7 +230,9 @@ def test_valid_looking_payload_tampering_is_detected(key: str, value: str) -> No
 @pytest.mark.parametrize("key", ["volume", "price"])
 def test_rehashed_noncanonical_numbers_are_rejected(key: str, value: str) -> None:
     mapping, metadata, _ = evidence()
-    result = KrakenOrderPreflight.build(intent=intent(), mapping=mapping, metadata=metadata)
+    result = KrakenOrderPreflight.build(
+        intent=intent(), mapping=mapping, metadata=metadata, evaluated_at=AT
+    )
     payload = dict(result.payload)
     payload[key] = value
     object.__setattr__(result, "payload", tuple(sorted(payload.items())))
@@ -236,7 +244,9 @@ def test_rehashed_noncanonical_numbers_are_rejected(key: str, value: str) -> Non
 @pytest.mark.parametrize("mutation", ["extra", "duplicate", "reorder", "list", "malformed"])
 def test_payload_shape_is_strict(mutation: str) -> None:
     mapping, metadata, _ = evidence()
-    result = KrakenOrderPreflight.build(intent=intent(), mapping=mapping, metadata=metadata)
+    result = KrakenOrderPreflight.build(
+        intent=intent(), mapping=mapping, metadata=metadata, evaluated_at=AT
+    )
     payloads = {
         "extra": tuple(sorted(result.payload + (("leverage", "2"),))),
         "duplicate": result.payload + (result.payload[0],),
@@ -278,31 +288,37 @@ def test_revalidation_preserves_valid_orders(order_type: OrderType, signal: Sign
 def test_rehash_cannot_bypass_source_binding(key: str, value: str) -> None:
     mapping, metadata, _ = evidence()
     order = intent()
-    result = KrakenOrderPreflight.build(intent=order, mapping=mapping, metadata=metadata)
+    result = KrakenOrderPreflight.build(
+        intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT
+    )
     payload = dict(result.payload)
     payload[key] = value
     object.__setattr__(result, "payload", tuple(sorted(payload.items())))
     rehash(result)
     result.validate()  # Internal consistency alone does not establish source binding.
     with pytest.raises(ExecutionError, match="KRAKEN_PREFLIGHT_BINDING_INVALID"):
-        result.validate_against(intent=order, mapping=mapping, metadata=metadata)
+        result.validate_against(intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT)
 
 
 def test_revalidation_reruns_constraints_and_rejects_other_evidence() -> None:
     mapping, metadata, _ = evidence()
     order = intent()
-    result = KrakenOrderPreflight.build(intent=order, mapping=mapping, metadata=metadata)
+    result = KrakenOrderPreflight.build(
+        intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT
+    )
     with pytest.raises(ExecutionError, match="KRAKEN_NOTIONAL_BELOW_MINIMUM"):
         result.validate_against(
             intent=order,
             mapping=mapping,
             metadata=replace(metadata, minimum_notional=Decimal("1000")),
+            evaluated_at=AT,
         )
     with pytest.raises(ExecutionError, match="KRAKEN_PREFLIGHT_BINDING_INVALID"):
         result.validate_against(
             intent=order,
             mapping=mapping,
             metadata=replace(metadata, minimum_notional=Decimal("1")),
+            evaluated_at=AT,
         )
 
 
@@ -311,8 +327,10 @@ def test_validated_preflight_does_not_enable_submission() -> None:
 
     mapping, metadata, _ = evidence()
     order = intent()
-    result = KrakenOrderPreflight.build(intent=order, mapping=mapping, metadata=metadata)
-    result.validate_against(intent=order, mapping=mapping, metadata=metadata)
+    result = KrakenOrderPreflight.build(
+        intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT
+    )
+    result.validate_against(intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT)
     with pytest.raises(ExecutionError, match="KRAKEN_ECONOMIC_EXECUTION_NOT_QUALIFIED"):
         DisabledKrakenEconomicTransport().submit(order)
 
@@ -329,7 +347,9 @@ def test_validated_preflight_does_not_enable_submission() -> None:
 )
 def test_wrong_identity_types_fail_closed(field: str) -> None:
     mapping, metadata, _ = evidence()
-    result = KrakenOrderPreflight.build(intent=intent(), mapping=mapping, metadata=metadata)
+    result = KrakenOrderPreflight.build(
+        intent=intent(), mapping=mapping, metadata=metadata, evaluated_at=AT
+    )
     object.__setattr__(result, field, "not-an-identity")
     with pytest.raises(ExecutionError, match="KRAKEN_PREFLIGHT_INVALID"):
         result.validate()
@@ -337,7 +357,9 @@ def test_wrong_identity_types_fail_closed(field: str) -> None:
 
 def test_rehashed_detached_client_id_fails_closed() -> None:
     mapping, metadata, _ = evidence()
-    result = KrakenOrderPreflight.build(intent=intent(), mapping=mapping, metadata=metadata)
+    result = KrakenOrderPreflight.build(
+        intent=intent(), mapping=mapping, metadata=metadata, evaluated_at=AT
+    )
     client_id = "atp-" + "0" * 14
     assert client_id != result.client_order_id
     object.__setattr__(result, "client_order_id", client_id)
@@ -437,12 +459,16 @@ def test_preflight_rechecks_consumed_evidence_integrity(tamper: str, reason: str
 def test_limit_preflight_rejects_tampered_metadata_without_market_price() -> None:
     mapping, metadata, _ = evidence()
     order = intent()
-    result = KrakenOrderPreflight.build(intent=order, mapping=mapping, metadata=metadata)
+    result = KrakenOrderPreflight.build(
+        intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT
+    )
     object.__setattr__(metadata, "minimum_quantity", Decimal("0.00001"))
     with pytest.raises(ExecutionError, match="KRAKEN_METADATA_NOT_AUTHORIZED"):
-        KrakenOrderPreflight.build(intent=order, mapping=mapping, metadata=metadata)
+        KrakenOrderPreflight.build(
+            intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT
+        )
     with pytest.raises(ExecutionError, match="KRAKEN_METADATA_NOT_AUTHORIZED"):
-        result.validate_against(intent=order, mapping=mapping, metadata=metadata)
+        result.validate_against(intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT)
 
 
 def test_market_price_age_is_bounded_at_the_supplied_evaluation_time() -> None:
@@ -478,10 +504,10 @@ def test_market_price_age_is_bounded_at_the_supplied_evaluation_time() -> None:
 @pytest.mark.parametrize(
     ("evaluated_at", "reason"),
     [
-        (None, "KRAKEN_PRICE_EVALUATION_TIME_REQUIRED"),
+        (None, "KRAKEN_PREFLIGHT_TIME_REQUIRED"),
         (AT.replace(tzinfo=None), "KRAKEN_PREFLIGHT_TIME_INVALID"),
         ("2026-09-24T12:00:01Z", "KRAKEN_PREFLIGHT_TIME_INVALID"),
-        (AT - timedelta(microseconds=1), "KRAKEN_PRICE_EVIDENCE_EXPIRED"),
+        (AT - timedelta(microseconds=1), "KRAKEN_METADATA_EVIDENCE_EXPIRED"),
         (AT + timedelta(seconds=10, microseconds=1), "KRAKEN_PRICE_EVIDENCE_EXPIRED"),
     ],
 )
@@ -499,8 +525,61 @@ def test_market_preflight_rejects_missing_invalid_future_or_old_price_time(
         )
 
 
-def test_limit_order_without_public_price_needs_no_evaluation_time() -> None:
+def test_limit_order_requires_evaluation_time_for_metadata() -> None:
     mapping, metadata, _ = evidence()
     order = intent()
-    result = KrakenOrderPreflight.build(intent=order, mapping=mapping, metadata=metadata)
-    result.validate_against(intent=order, mapping=mapping, metadata=metadata)
+    with pytest.raises(ExecutionError, match="KRAKEN_PREFLIGHT_TIME_REQUIRED"):
+        KrakenOrderPreflight.build(intent=order, mapping=mapping, metadata=metadata)
+    result = KrakenOrderPreflight.build(
+        intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT
+    )
+    with pytest.raises(ExecutionError, match="KRAKEN_PREFLIGHT_TIME_REQUIRED"):
+        result.validate_against(intent=order, mapping=mapping, metadata=metadata)
+    result.validate_against(intent=order, mapping=mapping, metadata=metadata, evaluated_at=AT)
+
+
+def test_limit_metadata_age_boundary_and_revalidation() -> None:
+    mapping, metadata, _ = evidence()
+    order = intent()
+    at_boundary = AT + timedelta(minutes=1)
+    result = KrakenOrderPreflight.build(
+        intent=order, mapping=mapping, metadata=metadata, evaluated_at=at_boundary
+    )
+    equivalent_zone = at_boundary.astimezone(timezone(timedelta(hours=2)))
+    result.validate_against(
+        intent=order, mapping=mapping, metadata=metadata, evaluated_at=equivalent_zone
+    )
+    with pytest.raises(ExecutionError, match="KRAKEN_METADATA_EVIDENCE_EXPIRED"):
+        result.validate_against(
+            intent=order,
+            mapping=mapping,
+            metadata=metadata,
+            evaluated_at=AT + timedelta(minutes=1, microseconds=1),
+        )
+
+
+@pytest.mark.parametrize(
+    "evaluated_at", [AT - timedelta(microseconds=1), AT + timedelta(minutes=1, microseconds=1)]
+)
+def test_limit_rejects_future_or_expired_mapping_metadata(evaluated_at: datetime) -> None:
+    mapping, metadata, _ = evidence()
+    with pytest.raises(ExecutionError, match="KRAKEN_METADATA_EVIDENCE_EXPIRED"):
+        KrakenOrderPreflight.build(
+            intent=intent(), mapping=mapping, metadata=metadata, evaluated_at=evaluated_at
+        )
+
+
+def test_price_future_rejected_when_mapping_metadata_are_current() -> None:
+    mapping, metadata, price = evidence()
+    future_observation = PublicObservation(AT, AT + timedelta(seconds=1))
+    future_price = replace(
+        price, observed_at=AT + timedelta(seconds=1), observation=future_observation
+    )
+    with pytest.raises(ExecutionError, match="KRAKEN_PRICE_EVIDENCE_EXPIRED"):
+        KrakenOrderPreflight.build(
+            intent=intent(order_type=OrderType.MARKET),
+            mapping=mapping,
+            metadata=metadata,
+            market_price=future_price,
+            evaluated_at=AT,
+        )

@@ -23,6 +23,7 @@ from atp.exchange.read_only import verify_record
 from atp.shared.identity import ContentIdentity
 
 MAX_PUBLIC_PRICE_AGE = timedelta(seconds=10)
+MAX_MAPPING_METADATA_AGE = timedelta(minutes=1)
 
 
 def _decimal_text(value: Decimal) -> str:
@@ -184,8 +185,8 @@ class KrakenOrderPreflight:
     ) -> None:
         """Rebuild against caller-supplied evidence; a digest alone is not authority.
 
-        Price age is checked against the caller-supplied evaluation time. This
-        method does not authenticate that time or authorize economic submission.
+        Evidence age is checked against the caller-supplied evaluation time.
+        This method does not authenticate that time or authorize submission.
         """
         self.validate()
         expected = KrakenOrderPreflight.build(
@@ -230,9 +231,14 @@ def _validate_evidence(
         or metadata.observed_at != mapping.observed_at
     ):
         raise ExecutionError("KRAKEN_METADATA_NOT_AUTHORIZED")
+    if market_price is None and intent.order_type is OrderType.MARKET:
+        raise ExecutionError("KRAKEN_MARKET_PRICE_REQUIRED")
+    if evaluated_at is None:
+        raise ExecutionError("KRAKEN_PREFLIGHT_TIME_REQUIRED")
+    metadata_age = evaluated_at.astimezone(UTC) - mapping.observed_at.astimezone(UTC)
+    if not timedelta(0) <= metadata_age <= MAX_MAPPING_METADATA_AGE:
+        raise ExecutionError("KRAKEN_METADATA_EVIDENCE_EXPIRED")
     if market_price is None:
-        if intent.order_type is OrderType.MARKET:
-            raise ExecutionError("KRAKEN_MARKET_PRICE_REQUIRED")
         return
     if (
         type(market_price) is not PublicPriceEvidence
@@ -243,8 +249,6 @@ def _validate_evidence(
         or market_price.freshness != "OBSERVATION_FRESH"
     ):
         raise ExecutionError("KRAKEN_PRICE_EVIDENCE_INVALID")
-    if evaluated_at is None:
-        raise ExecutionError("KRAKEN_PRICE_EVALUATION_TIME_REQUIRED")
     age = evaluated_at.astimezone(UTC) - market_price.observed_at.astimezone(UTC)
     if not timedelta(0) <= age <= MAX_PUBLIC_PRICE_AGE:
         raise ExecutionError("KRAKEN_PRICE_EVIDENCE_EXPIRED")
