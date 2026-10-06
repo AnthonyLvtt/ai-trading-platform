@@ -30,12 +30,15 @@ from atp.risk.model import (
     PortfolioState,
     PositionDirection,
     PositionSide,
+    RiskDecision,
     RiskMarketContext,
+    RiskReasonCode,
+    RiskStatus,
 )
 from atp.risk.policy import RiskPolicy
 from atp.shared.environment import Environment
 from atp.shared.identity import ContentIdentity
-from atp.strategy.model import SignalKind
+from atp.strategy.model import EvaluationStatus, SignalKind
 from tests.unit.test_strategy_baseline import context, snapshot, strategy
 
 
@@ -141,6 +144,65 @@ def test_tampered_risk_binding_is_rejected() -> None:
         "strategy_evaluation_identity",
         decision.provenance.risk_policy_identity,
     )
+    with pytest.raises(ExecutionError, match="RISK_BINDING_INVALID"):
+        OrderIntent.create(
+            strategy_evaluation=evaluation,
+            risk_decision=decision,
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("0.001"),
+        )
+
+
+def test_rejected_risk_cannot_be_relabelled_approved() -> None:
+    evaluation, approved_decision = approved(SignalKind.LONG_ENTRY)
+    rejected = RiskDecision.create(
+        status=RiskStatus.REJECTED,
+        reason_code=RiskReasonCode.MARKET_TYPE_NOT_SPOT,
+        provenance=approved_decision.provenance,
+    )
+    object.__setattr__(rejected, "status", RiskStatus.APPROVED)
+    with pytest.raises(ExecutionError, match="RISK_BINDING_INVALID"):
+        OrderIntent.create(
+            strategy_evaluation=evaluation,
+            risk_decision=rejected,
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("0.001"),
+        )
+
+
+def test_tampered_signal_kind_cannot_change_order_side() -> None:
+    evaluation, decision = approved(SignalKind.LONG_ENTRY)
+    assert evaluation.signal is not None
+    object.__setattr__(evaluation.signal, "kind", SignalKind.EXIT)
+    with pytest.raises(ExecutionError, match="RISK_BINDING_INVALID"):
+        OrderIntent.create(
+            strategy_evaluation=evaluation,
+            risk_decision=decision,
+            side=OrderSide.SELL,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("0.001"),
+        )
+
+
+def test_tampered_evaluation_status_is_rejected() -> None:
+    evaluation, decision = approved(SignalKind.LONG_ENTRY)
+    object.__setattr__(evaluation, "status", EvaluationStatus.BLOCKED_INPUT)
+    with pytest.raises(ExecutionError, match="RISK_BINDING_INVALID"):
+        OrderIntent.create(
+            strategy_evaluation=evaluation,
+            risk_decision=decision,
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("0.001"),
+        )
+
+
+def test_tampered_risk_market_context_is_rejected() -> None:
+    evaluation, decision = approved(SignalKind.LONG_ENTRY)
+    assert decision.provenance.market_context is not None
+    object.__setattr__(decision.provenance.market_context, "symbol", "ETH/EUR")
     with pytest.raises(ExecutionError, match="RISK_BINDING_INVALID"):
         OrderIntent.create(
             strategy_evaluation=evaluation,
