@@ -1,8 +1,8 @@
 """Offline qualification policy for OMS exposure evidence sources.
 
-This module records which evidence sources are accepted in principle and their
-maximum ages. It deliberately does not create spendable-funds or fee evidence,
-does not open new Kraken routes, and cannot authorize an exposure PASS.
+This module separates offline producer semantics, observation qualification,
+exposure-source qualification, and network-call authority. It cannot authorize
+an OMS PASS by itself.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ class ExposureSourceContract(EvidenceRecord):
     venue: VenueId
     mechanism: str
     route: str | None
+    offline_producer_qualified: bool
     observation_qualified: bool
     exposure_source_qualified: bool
     network_authority_granted: bool = False
@@ -48,8 +49,11 @@ class ExposureSourceContract(EvidenceRecord):
             or type(self.mechanism) is not str
             or not self.mechanism
             or (self.route is not None and not self.route.startswith("/0/"))
+            or type(self.offline_producer_qualified) is not bool
             or type(self.observation_qualified) is not bool
             or type(self.exposure_source_qualified) is not bool
+            or self.observation_qualified
+            and not self.offline_producer_qualified
             or self.exposure_source_qualified
             and not self.observation_qualified
             or self.network_authority_granted is not False
@@ -119,6 +123,7 @@ ACCOUNT_BALANCE_SOURCE = ExposureSourceContract(
     venue=VenueId.KRAKEN,
     mechanism="KRAKEN_PRIVATE_BALANCE",
     route="/0/private/Balance",
+    offline_producer_qualified=True,
     observation_qualified=True,
     exposure_source_qualified=True,
 )
@@ -128,6 +133,7 @@ ACCOUNT_OPEN_ORDERS_SOURCE = ExposureSourceContract(
     venue=VenueId.KRAKEN,
     mechanism="KRAKEN_PRIVATE_OPEN_ORDERS",
     route="/0/private/OpenOrders",
+    offline_producer_qualified=True,
     observation_qualified=True,
     exposure_source_qualified=True,
 )
@@ -137,6 +143,7 @@ SPENDABLE_EUR_SOURCE = ExposureSourceContract(
     venue=VenueId.KRAKEN,
     mechanism="KRAKEN_BALANCE_EX",
     route="/0/private/BalanceEx",
+    offline_producer_qualified=True,
     observation_qualified=False,
     exposure_source_qualified=False,
 )
@@ -144,8 +151,9 @@ SPENDABLE_EUR_SOURCE = ExposureSourceContract(
 BOUNDED_FEE_SOURCE = ExposureSourceContract(
     kind=ExposureSourceKind.BOUNDED_FEE,
     venue=VenueId.KRAKEN,
-    mechanism="KRAKEN_SPOT_FEE_SCHEDULE",
-    route=None,
+    mechanism="KRAKEN_TRADE_VOLUME_MAX_TAKER_FEE",
+    route="/0/private/TradeVolume",
+    offline_producer_qualified=True,
     observation_qualified=False,
     exposure_source_qualified=False,
 )
@@ -155,6 +163,7 @@ VALUATION_PRICE_SOURCE = ExposureSourceContract(
     venue=VenueId.KRAKEN,
     mechanism="KRAKEN_PUBLIC_TICKER",
     route="/0/public/Ticker",
+    offline_producer_qualified=True,
     observation_qualified=True,
     exposure_source_qualified=True,
 )
@@ -180,19 +189,21 @@ class ExposureEvidenceQualification(EvidenceRecord):
     side_effect_performed: bool = False
 
     def __post_init__(self) -> None:
+        offline_ready = all(
+            source.offline_producer_qualified for source in EXPOSURE_SOURCE_REGISTRY
+        )
+        blockers = tuple(
+            source.kind
+            for source in EXPOSURE_SOURCE_REGISTRY
+            if not source.exposure_source_qualified
+        )
         if (
             type(self.freshness_policy_identity) is not ContentIdentity
             or self.source_contract_identities
             != tuple(source.content_identity for source in EXPOSURE_SOURCE_REGISTRY)
-            or self.offline_contracts_qualified is not True
-            or type(self.runtime_pass_qualified) is not bool
-            or self.blocking_source_kinds
-            != tuple(
-                source.kind
-                for source in EXPOSURE_SOURCE_REGISTRY
-                if not source.exposure_source_qualified
-            )
-            or self.runtime_pass_qualified != (len(self.blocking_source_kinds) == 0)
+            or self.offline_contracts_qualified is not offline_ready
+            or self.blocking_source_kinds != blockers
+            or self.runtime_pass_qualified != (len(blockers) == 0)
             or self.real_economic_calls != 0
             or self.live != "LIVE_FORBIDDEN"
             or self.side_effect_performed is not False
