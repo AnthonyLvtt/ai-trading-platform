@@ -42,6 +42,28 @@ def test_offline_formula_and_route_remains_closed() -> None:
     assert "/0/private/BalanceEx" not in KRAKEN_PRIVATE_READ_ROUTE_ALLOWLIST
 
 
+def test_available_amount_retains_digits_beyond_default_decimal_precision() -> None:
+    payload = fixture()
+    eur = payload["result"]["ZEUR"]
+    eur["balance"] = "1.0000000000000000000000000000000000000001"
+    eur["hold_trade"] = "0"
+    eur["credit"] = "0"
+    eur["credit_used"] = "0"
+    rows = parse_offline_extended_balance(payload)
+    assert rows[1].available == Decimal("1.0000000000000000000000000000000000000001")
+
+
+def test_excessive_precision_fails_instead_of_rounding_available() -> None:
+    payload = fixture()
+    eur = payload["result"]["ZEUR"]
+    eur["balance"] = "1"
+    eur["credit"] = "0." + "0" * 100 + "1"
+    eur["credit_used"] = "0"
+    eur["hold_trade"] = "0"
+    with pytest.raises(ExtendedBalanceShapeError, match="BALANCE_EX_ARITHMETIC_UNSAFE"):
+        parse_offline_extended_balance(payload)
+
+
 @pytest.mark.parametrize(
     ("change", "reason"),
     [

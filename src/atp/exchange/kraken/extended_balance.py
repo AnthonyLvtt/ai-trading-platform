@@ -7,7 +7,7 @@ output is unqualified data and cannot authorize an order or a real private read.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, DecimalException, Inexact, InvalidOperation, localcontext
 
 
 class ExtendedBalanceShapeError(ValueError):
@@ -31,9 +31,22 @@ class OfflineExtendedBalance:
             or type(self.available) is not Decimal
             or not self.available.is_finite()
             or self.available < 0
-            or self.available != self.balance + self.credit - self.credit_used - self.hold_trade
+            or self.available
+            != _exact_available(self.balance, self.credit, self.credit_used, self.hold_trade)
         ):
             raise ExtendedBalanceShapeError("BALANCE_EX_ROW_INVALID")
+
+
+def _exact_available(
+    balance: Decimal, credit: Decimal, credit_used: Decimal, hold_trade: Decimal
+) -> Decimal:
+    try:
+        with localcontext() as context:
+            context.prec = 100
+            context.traps[Inexact] = True
+            return balance + credit - credit_used - hold_trade
+    except DecimalException:
+        raise ExtendedBalanceShapeError("BALANCE_EX_ARITHMETIC_UNSAFE") from None
 
 
 def _amount(value: object) -> Decimal:
@@ -74,7 +87,7 @@ def parse_offline_extended_balance(payload: object) -> tuple[OfflineExtendedBala
         hold_trade = _amount(raw["hold_trade"])
         credit = _amount(raw["credit"])
         credit_used = _amount(raw["credit_used"])
-        available = balance + credit - credit_used - hold_trade
+        available = _exact_available(balance, credit, credit_used, hold_trade)
         if available < 0:
             raise ExtendedBalanceShapeError("BALANCE_EX_AVAILABLE_NEGATIVE")
         rows.append(
