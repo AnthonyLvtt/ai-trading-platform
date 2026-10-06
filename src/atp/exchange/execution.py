@@ -294,16 +294,18 @@ class ExecutionLedger:
         db: sqlite3.Connection, key: ContentIdentity
     ) -> SubmissionState | None:
         rows = db.execute(
-            "SELECT state, previous_state, reason_code FROM execution_transitions "
-            "WHERE idempotency_key = ? ORDER BY sequence",
-            (str(key),),
-        ).fetchall()
-        current: SubmissionState | None = None
-        for state_text, previous_text, reason_code in rows:
+            "SELECT idempotency_key, state, previous_state, reason_code "
+            "FROM execution_transitions ORDER BY sequence",
+        )
+        states: dict[str, SubmissionState] = {}
+        for key_text, state_text, previous_text, reason_code in rows:
+            if type(key_text) is not str or not re.fullmatch(r"sha256:[0-9a-f]{64}", key_text):
+                raise ExecutionError("LEDGER_HISTORY_INVALID")
             try:
                 state = SubmissionState(state_text)
-            except ValueError:
+            except (TypeError, ValueError):
                 raise ExecutionError("LEDGER_HISTORY_INVALID") from None
+            current = states.get(key_text)
             if (
                 (current is None and state is not SubmissionState.PREPARED)
                 or (current is not None and state not in _ALLOWED_TRANSITIONS[current])
@@ -312,8 +314,8 @@ class ExecutionLedger:
                 or not re.fullmatch(r"[A-Z0-9_]{3,80}", reason_code)
             ):
                 raise ExecutionError("LEDGER_HISTORY_INVALID")
-            current = state
-        return current
+            states[key_text] = state
+        return states.get(str(key))
 
     def _append(
         self,

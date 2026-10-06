@@ -319,12 +319,12 @@ def test_tampered_intent_is_rejected_at_consumption_boundary() -> None:
         DisabledKrakenEconomicTransport().submit(intent)
 
 
-def _order_intent() -> OrderIntent:
-    evaluation, decision = approved(SignalKind.LONG_ENTRY)
+def _order_intent(signal_kind: SignalKind = SignalKind.LONG_ENTRY) -> OrderIntent:
+    evaluation, decision = approved(signal_kind)
     return OrderIntent.create(
         strategy_evaluation=evaluation,
         risk_decision=decision,
-        side=OrderSide.BUY,
+        side=OrderSide.BUY if signal_kind is SignalKind.LONG_ENTRY else OrderSide.SELL,
         order_type=OrderType.MARKET,
         quantity=Decimal("0.001"),
     )
@@ -395,6 +395,46 @@ def test_tampered_or_divergent_history_fails_closed(
         ledger.current_state(intent.idempotency_key)
     with pytest.raises(ExecutionError, match="LEDGER_HISTORY_INVALID"):
         ledger.transition(intent, SubmissionState.RECONCILED, reason_code="READ_ONLY_RECONCILED")
+
+
+@pytest.mark.parametrize("corruption", ["transition", "key"])
+def test_unrelated_corruption_blocks_ledger_operations(tmp_path: Path, corruption: str) -> None:
+    first = _order_intent()
+    second = _order_intent(SignalKind.EXIT)
+    path = tmp_path / "execution.sqlite"
+    ledger = ExecutionLedger(path)
+    ledger.prepare(first)
+    with sqlite3.connect(path) as db:
+        if corruption == "transition":
+            db.execute(
+                "INSERT INTO execution_transitions "
+                "(idempotency_key, state, previous_state, reason_code) VALUES (?, ?, ?, ?)",
+                (str(first.idempotency_key), "ACKNOWLEDGED", "PREPARED", "INJECTED_ROW"),
+            )
+        else:
+            db.execute(
+                "INSERT INTO execution_transitions "
+                "(idempotency_key, state, previous_state, reason_code) VALUES (?, ?, ?, ?)",
+                ("malformed-key", "PREPARED", None, "INJECTED_ROW"),
+            )
+    with pytest.raises(ExecutionError, match="LEDGER_HISTORY_INVALID"):
+        ledger.current_state(second.idempotency_key)
+    with pytest.raises(ExecutionError, match="LEDGER_HISTORY_INVALID"):
+        ledger.prepare(second)
+
+
+def test_interleaved_valid_order_histories_remain_independent(tmp_path: Path) -> None:
+    first = _order_intent()
+    second = _order_intent(SignalKind.EXIT)
+    ledger = ExecutionLedger(tmp_path / "execution.sqlite")
+    ledger.prepare(first)
+    ledger.prepare(second)
+    ledger.transition(first, SubmissionState.ATTEMPT_STARTED, reason_code="ATTEMPT_RESERVED")
+    ledger.transition(second, SubmissionState.ATTEMPT_STARTED, reason_code="ATTEMPT_RESERVED")
+    ledger.transition(first, SubmissionState.UNKNOWN, reason_code="OUTCOME_AMBIGUOUS")
+    ledger.transition(second, SubmissionState.ACKNOWLEDGED, reason_code="OBSERVED_OUTCOME")
+    assert ledger.current_state(first.idempotency_key) is SubmissionState.UNKNOWN
+    assert ledger.current_state(second.idempotency_key) is SubmissionState.ACKNOWLEDGED
 
 
 def test_invalid_transition_target_and_reason_fail_closed(tmp_path: Path) -> None:
