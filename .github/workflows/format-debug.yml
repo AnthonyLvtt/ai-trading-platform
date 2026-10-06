@@ -1,0 +1,18 @@
+name: Format Debug
+
+on:
+  push:
+    branches:
+      - agent/eng-exch-kraken-021-bounded-exposure-transport
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --dev --frozen
+      - run: uv run ruff format --diff tests/unit/test_kraken_exposure_transport.py
