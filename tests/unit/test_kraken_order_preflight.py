@@ -10,7 +10,7 @@ import pytest
 
 from atp.exchange.contracts import BTC_EUR, PublicObservation
 from atp.exchange.execution import ExecutionError, OrderIntent, OrderSide, OrderType
-from atp.exchange.kraken.preflight import KrakenOrderPreflight
+from atp.exchange.kraken.preflight import KrakenOrderPreflight, _client_order_id
 from atp.exchange.kraken.public import parse_asset_pairs, parse_ticker_price
 from atp.strategy.model import SignalKind
 from tests.unit.test_kraken_execution_foundation import approved
@@ -94,6 +94,16 @@ def test_equivalent_decimal_spellings_preserve_payload_and_client_id() -> None:
     assert first.client_order_id == duplicate.client_order_id
     assert first.payload == duplicate.payload
     assert first.content_identity == duplicate.content_identity
+
+
+def test_client_order_id_uses_more_than_the_old_14_hex_prefix() -> None:
+    from atp.shared.identity import ContentIdentity
+
+    first = ContentIdentity("sha256", "a" * 14 + "0" * 50)
+    second = ContentIdentity("sha256", "a" * 14 + "1" * 50)
+    assert _client_order_id(first) != _client_order_id(second)
+    assert len(_client_order_id(first)) == 32
+    assert _client_order_id(first) == first.digest[:32]
 
 
 def test_market_preflight_requires_fresh_bound_price_for_notional_check() -> None:
@@ -380,7 +390,7 @@ def test_rehashed_detached_client_id_fails_closed() -> None:
     result = KrakenOrderPreflight.build(
         intent=intent(), mapping=mapping, metadata=metadata, evaluated_at=AT
     )
-    client_id = "atp-" + "0" * 14
+    client_id = "0" * 32
     assert client_id != result.client_order_id
     object.__setattr__(result, "client_order_id", client_id)
     payload = dict(result.payload)

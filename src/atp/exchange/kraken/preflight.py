@@ -32,6 +32,11 @@ def _aligned(value: Decimal, increment: Decimal) -> bool:
     return value % increment == 0
 
 
+def _client_order_id(intent_identity: ContentIdentity) -> str:
+    """Use Kraken's 32-hex short UUID form for a deterministic 128-bit tag."""
+    return intent_identity.digest[:32]
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class KrakenOrderPreflight:
     intent_identity: ContentIdentity
@@ -58,7 +63,7 @@ class KrakenOrderPreflight:
         _validate_evidence(intent, mapping, metadata, market_price, evaluated_at)
         _validate_constraints(intent, metadata, market_price)
 
-        client_order_id = f"atp-{intent.idempotency_key.digest[:14]}"
+        client_order_id = _client_order_id(intent.idempotency_key)
         payload_items = [
             ("cl_ord_id", client_order_id),
             ("ordertype", intent.order_type.value.casefold()),
@@ -117,7 +122,7 @@ class KrakenOrderPreflight:
             raise ExecutionError("KRAKEN_PREFLIGHT_INVALID")
         if (
             type(self.client_order_id) is not str
-            or self.client_order_id != f"atp-{self.intent_identity.digest[:14]}"
+            or self.client_order_id != _client_order_id(self.intent_identity)
             or type(self.payload) is not tuple
             or any(
                 type(item) is not tuple
