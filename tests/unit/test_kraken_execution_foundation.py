@@ -96,6 +96,35 @@ def test_buy_intent_requires_exact_strategy_and_approved_risk_binding() -> None:
     assert intent.idempotency_key == duplicate.idempotency_key
 
 
+@pytest.mark.parametrize("order_type", [OrderType.MARKET, OrderType.LIMIT])
+def test_equivalent_decimal_spellings_share_one_idempotency_key(
+    order_type: OrderType, tmp_path: Path
+) -> None:
+    evaluation, decision = approved(SignalKind.LONG_ENTRY)
+    common = {
+        "strategy_evaluation": evaluation,
+        "risk_decision": decision,
+        "side": OrderSide.BUY,
+        "order_type": order_type,
+    }
+    first = OrderIntent.create(
+        **common,
+        quantity=Decimal("0.001"),
+        limit_price=Decimal("95000") if order_type is OrderType.LIMIT else None,
+    )
+    duplicate = OrderIntent.create(
+        **common,
+        quantity=Decimal("1E-3"),
+        limit_price=Decimal("95000.00") if order_type is OrderType.LIMIT else None,
+    )
+    assert first.idempotency_key == duplicate.idempotency_key
+
+    ledger = ExecutionLedger(tmp_path / "execution.sqlite")
+    ledger.prepare(first)
+    with pytest.raises(ExecutionError, match="IDEMPOTENCY_KEY_ALREADY_RECORDED"):
+        ledger.prepare(duplicate)
+
+
 def test_exit_signal_builds_sell_intent() -> None:
     evaluation, decision = approved(SignalKind.EXIT)
     intent = OrderIntent.create(

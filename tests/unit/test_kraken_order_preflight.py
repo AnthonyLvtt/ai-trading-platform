@@ -76,6 +76,26 @@ def test_limit_preflight_is_deterministic_and_uses_qualified_native_mapping() ->
     }
 
 
+def test_equivalent_decimal_spellings_preserve_payload_and_client_id() -> None:
+    mapping, metadata, _ = evidence()
+    first = KrakenOrderPreflight.build(
+        intent=intent(quantity=Decimal("0.001"), price=Decimal("95000")),
+        mapping=mapping,
+        metadata=metadata,
+        evaluated_at=AT,
+    )
+    duplicate = KrakenOrderPreflight.build(
+        intent=intent(quantity=Decimal("0.0010"), price=Decimal("95000.00")),
+        mapping=mapping,
+        metadata=metadata,
+        evaluated_at=AT,
+    )
+    assert first.intent_identity == duplicate.intent_identity
+    assert first.client_order_id == duplicate.client_order_id
+    assert first.payload == duplicate.payload
+    assert first.content_identity == duplicate.content_identity
+
+
 def test_market_preflight_requires_fresh_bound_price_for_notional_check() -> None:
     mapping, metadata, price = evidence()
     order = intent(order_type=OrderType.MARKET, price=None)

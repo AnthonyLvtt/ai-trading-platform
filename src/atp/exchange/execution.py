@@ -24,6 +24,12 @@ class ExecutionError(ValueError):
     pass
 
 
+def _decimal_text(value: Decimal) -> str:
+    """Canonical fixed-point text shared by intent identity and Kraken payload."""
+    text = format(value, "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
 class OrderSide(StrEnum):
     BUY = "BUY"
     SELL = "SELL"
@@ -73,9 +79,9 @@ class OrderIntent:
         assert signal is not None
         value = {
             "instrument": instrument.symbol,
-            "limit_price": None if limit_price is None else str(limit_price),
+            "limit_price": None if limit_price is None else _decimal_text(limit_price),
             "order_type": order_type.value,
-            "quantity": str(quantity),
+            "quantity": _decimal_text(quantity),
             "risk_decision_identity": str(risk_decision.content_identity),
             "side": side.value,
             "strategy_evaluation_identity": str(strategy_evaluation.content_identity),
@@ -125,9 +131,11 @@ class OrderIntent:
         expected = ContentIdentity.from_canonical(
             {
                 "instrument": self.instrument.symbol,
-                "limit_price": None if self.limit_price is None else str(self.limit_price),
+                "limit_price": None
+                if self.limit_price is None
+                else _decimal_text(self.limit_price),
                 "order_type": self.order_type.value,
-                "quantity": str(self.quantity),
+                "quantity": _decimal_text(self.quantity),
                 "risk_decision_identity": str(self.risk_decision_identity),
                 "side": self.side.value,
                 "strategy_evaluation_identity": str(self.strategy_evaluation_identity),
