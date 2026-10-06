@@ -52,7 +52,7 @@ class Response:
 
 
 class Connection:
-    instances: list["Connection"] = []
+    instances: list[Connection] = []
     response = Response()
 
     def __init__(self, host, *, port, timeout, context) -> None:
@@ -81,10 +81,12 @@ def reset_connection() -> None:
 
 
 def test_exposure_allowlist_is_separate_and_non_economic() -> None:
-    assert KRAKEN_EXPOSURE_ROUTE_ALLOWLIST == {
-        "/0/private/BalanceEx",
-        "/0/private/TradeVolume",
-    }
+    assert KRAKEN_EXPOSURE_ROUTE_ALLOWLIST == frozenset(
+        {
+            "/0/private/BalanceEx",
+            "/0/private/TradeVolume",
+        }
+    )
     assert not KRAKEN_EXPOSURE_ROUTE_ALLOWLIST & KRAKEN_PRIVATE_READ_ROUTE_ALLOWLIST
     assert not any(
         token in route.casefold()
