@@ -49,7 +49,8 @@ class ExposureSourceContract(EvidenceRecord):
             or (self.route is not None and not self.route.startswith("/0/"))
             or type(self.observation_qualified) is not bool
             or type(self.runtime_authorized) is not bool
-            or self.runtime_authorized and not self.observation_qualified
+            or self.runtime_authorized
+            and not self.observation_qualified
             or self.real_economic_calls != 0
             or self.live != "LIVE_FORBIDDEN"
             or self.side_effect_performed is not False
@@ -80,9 +81,7 @@ class ExposureFreshnessPolicy(EvidenceRecord):
         )
         if (
             any(
-                type(value) is not Decimal
-                or not value.is_finite()
-                or value <= 0
+                type(value) is not Decimal or not value.is_finite() or value <= 0
                 for value in values
             )
             or self.policy_version != "1.0.0"
@@ -187,9 +186,7 @@ class ExposureEvidenceQualification(EvidenceRecord):
             or type(self.runtime_pass_qualified) is not bool
             or self.blocking_source_kinds
             != tuple(
-                source.kind
-                for source in EXPOSURE_SOURCE_REGISTRY
-                if not source.runtime_authorized
+                source.kind for source in EXPOSURE_SOURCE_REGISTRY if not source.runtime_authorized
             )
             or self.runtime_pass_qualified != (len(self.blocking_source_kinds) == 0)
             or self.real_economic_calls != 0
