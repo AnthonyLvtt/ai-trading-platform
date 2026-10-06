@@ -44,6 +44,8 @@ class OfflineExposureRequest(EvidenceRecord):
     account_identity: ContentIdentity
     parameters: tuple[tuple[str, str], ...]
     scope: str
+    host: str = "api.kraken.com"
+    method: str = "POST"
 
     def __post_init__(self) -> None:
         expected = {
@@ -64,6 +66,8 @@ class OfflineExposureRequest(EvidenceRecord):
                 )
             )
             or (self.parameters, self.scope) != expected[self.route]
+            or self.host != "api.kraken.com"
+            or self.method != "POST"
         ):
             raise EvidenceError("OFFLINE_EXPOSURE_REQUEST_INVALID")
         EvidenceRecord.__post_init__(self)

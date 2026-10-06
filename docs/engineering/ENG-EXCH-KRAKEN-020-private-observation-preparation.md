@@ -16,15 +16,16 @@ documentation.
 
 ## Exact proposed requests
 
-| Order | Route | Parameters | Scope |
-| --- | --- | --- | --- |
-| 1 | `/0/private/BalanceEx` | none beyond a future nonce | default wallet, EUR row required |
-| 2 | `/0/private/TradeVolume` | exactly `pair=XXBTZEUR` beyond a future nonce | account-level BTC/EUR Spot fee schedule |
+| Order | Method and host | Route | Parameters | Scope |
+| --- | --- | --- | --- | --- |
+| 1 | POST `api.kraken.com` | `/0/private/BalanceEx` | none beyond a future nonce | default wallet, EUR row required |
+| 2 | POST `api.kraken.com` | `/0/private/TradeVolume` | exactly `pair=XXBTZEUR` beyond a future nonce | account-level BTC/EUR Spot fee schedule |
 
 Each request binds one opaque credential-reference identity, the verified
 least-privilege capability identity, and the same account
-identity. There is no host, method, signature, nonce, credential loader, retry,
-or free route parameter in this offline contract. The real route allowlist
+identity. Host and method are fixed, with no free host or method, signature,
+nonce, credential loader, retry, or free route parameter in this offline
+contract. The real route allowlist
 remains exactly `GetApiKeyInfo`, `Balance`, and `OpenOrders`.
 The supplied account identity is a contract binding, not proof of a real
 account-to-credential mapping; that mapping remains part of real observation

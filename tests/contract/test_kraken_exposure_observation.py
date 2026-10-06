@@ -65,7 +65,12 @@ def inputs():
 
 @pytest.fixture(autouse=True)
 def clean_main_source(monkeypatch: pytest.MonkeyPatch):
-    source = replace(inspect_source(Path.cwd()), clean=True, source_branch="main")
+    source = replace(
+        inspect_source(Path.cwd()),
+        clean=True,
+        source_branch="main",
+        source_commit_sha=BASE,
+    )
     monkeypatch.setattr(
         "atp.kraken_private_qualification.exposure_observation.inspect_source",
         lambda root: source,
@@ -91,6 +96,9 @@ def test_exact_requests_cannot_reach_existing_transport() -> None:
     assert requests[1].parameters == (("pair", "XXBTZEUR"),)
     assert requests[0].scope == "DEFAULT_WALLET"
     assert requests[1].scope == "ACCOUNT_PAIR_BTC_EUR"
+    assert all(
+        request.host == "api.kraken.com" and request.method == "POST" for request in requests
+    )
     assert not {route.value for route in OfflineExposureRoute} & KRAKEN_PRIVATE_READ_ROUTE_ALLOWLIST
     for request in requests:
         with pytest.raises(KrakenPrivateTransportError, match="KRAKEN_PRIVATE_ROUTE_FORBIDDEN"):
@@ -101,6 +109,8 @@ def test_exact_requests_cannot_reach_existing_transport() -> None:
         replace(requests[1], parameters=(("pair", "XXBTZUSD"),))
     with pytest.raises(EvidenceError, match="OFFLINE_EXPOSURE_REQUEST_INVALID"):
         replace(requests[1], scope="DEFAULT_WALLET")
+    with pytest.raises(EvidenceError, match="OFFLINE_EXPOSURE_REQUEST_INVALID"):
+        replace(requests[1], host="example.invalid")
 
 
 def test_offline_pass_binds_source_account_capability_and_sanitizes(clean_main_source) -> None:
