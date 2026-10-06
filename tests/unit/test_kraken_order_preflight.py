@@ -151,6 +151,39 @@ def test_preflight_rejects_foreign_or_stale_mapping_metadata_binding() -> None:
         )
 
 
+@pytest.mark.parametrize("order_type", [OrderType.LIMIT, OrderType.MARKET])
+def test_mapping_and_metadata_must_share_one_public_source(order_type: OrderType) -> None:
+    from atp.shared.identity import ContentIdentity
+
+    mapping, metadata, price = evidence()
+    order = intent(order_type=order_type)
+    market_price = price if order_type is OrderType.MARKET else None
+    preflight = KrakenOrderPreflight.build(
+        intent=order,
+        mapping=mapping,
+        metadata=metadata,
+        market_price=market_price,
+        evaluated_at=AT,
+    )
+    mixed_source = replace(metadata, source_identity=ContentIdentity.from_text("other-pairs"))
+    with pytest.raises(ExecutionError, match="KRAKEN_METADATA_NOT_AUTHORIZED"):
+        KrakenOrderPreflight.build(
+            intent=order,
+            mapping=mapping,
+            metadata=mixed_source,
+            market_price=market_price,
+            evaluated_at=AT,
+        )
+    with pytest.raises(ExecutionError, match="KRAKEN_METADATA_NOT_AUTHORIZED"):
+        preflight.validate_against(
+            intent=order,
+            mapping=mapping,
+            metadata=mixed_source,
+            market_price=market_price,
+            evaluated_at=AT,
+        )
+
+
 @pytest.mark.parametrize(
     ("quantity", "price", "reason"),
     [

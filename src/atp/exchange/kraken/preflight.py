@@ -227,6 +227,7 @@ def _validate_evidence(
         or metadata.venue is not VenueId.KRAKEN
         or metadata.instrument != intent.instrument
         or metadata.mapping_identity != mapping.content_identity
+        or metadata.source_identity != mapping.metadata_identity
         or metadata.status != "online"
         or metadata.observed_at != mapping.observed_at
     ):
