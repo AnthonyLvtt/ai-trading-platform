@@ -22,9 +22,11 @@ def test_source_registry_qualifies_existing_reads_but_keeps_missing_sources_clos
     assert by_kind[ExposureSourceKind.ACCOUNT_OPEN_ORDERS].exposure_source_qualified is True
     assert by_kind[ExposureSourceKind.VALUATION_PRICE].exposure_source_qualified is True
     assert SPENDABLE_EUR_SOURCE.route == "/0/private/BalanceEx"
+    assert SPENDABLE_EUR_SOURCE.offline_producer_qualified is True
     assert SPENDABLE_EUR_SOURCE.exposure_source_qualified is False
     assert SPENDABLE_EUR_SOURCE.observation_qualified is False
-    assert BOUNDED_FEE_SOURCE.route is None
+    assert BOUNDED_FEE_SOURCE.route == "/0/private/TradeVolume"
+    assert BOUNDED_FEE_SOURCE.offline_producer_qualified is True
     assert BOUNDED_FEE_SOURCE.exposure_source_qualified is False
     assert BOUNDED_FEE_SOURCE.observation_qualified is False
     assert all(source.network_authority_granted is False for source in EXPOSURE_SOURCE_REGISTRY)
