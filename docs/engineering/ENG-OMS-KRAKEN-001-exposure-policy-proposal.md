@@ -1,14 +1,15 @@
 # ENG-OMS-KRAKEN-001 — Proposed offline entry exposure policy
 
-Status: **DRAFT — CTO decision required; no runtime authority**.
+Status: **ACCEPTED DESIGN — offline implementation authorized; runtime PASS not yet qualified**.
 Base: `7cec60045095c6e020e554fe5255209a1fd0e89b` (post-merge Quality #172 succeeded).
 
 ## Decision requested
 
 The CIO has specified a maximum **10% of portfolio value for each BTC/EUR BUY
-entry**. This document proposes the exact fail-closed interpretation for CTO
-review. It does not amend the accepted Risk V1 policy, which deliberately has
-no order sizing, and it does not enable an order path.
+entry**. The CTO accepted the following fail-closed interpretation on canonical
+`main` `46084667261a11f31f5d3b102d28933f8b170e4d` after PR #50 and
+post-merge Quality #174. It remains at the OMS/exposure boundary, downstream of
+Risk approval. It does not amend Risk V1 or enable an order path.
 
 ## Proposed rule
 
@@ -63,8 +64,8 @@ an instruction to trade.
 
 ## Authority and exclusions
 
-CTO acceptance is needed before a normative policy or passing assessment is
-implemented. The CIO's 10% limit is recorded here, but no cap is inferred from
+The CTO accepted this design for offline implementation, but runtime PASS is not
+qualified. The CIO's 10% limit is recorded here, but no cap is inferred from
 credentials, a historical balance, or a default account size. The proposal
 introduces no real credential, private call, nonce, signature, transport,
 economic call, retry, Testnet, or Live capability. Kraken-only, Spot BTC/EUR,
