@@ -92,9 +92,7 @@ class KrakenExposureHTTPTransport:
 
     __slots__ = ("_clock",)
 
-    def __init__(
-        self, clock: Callable[[], datetime] = lambda: datetime.now(UTC)
-    ) -> None:
+    def __init__(self, clock: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
         self._clock = clock
 
     def post(
