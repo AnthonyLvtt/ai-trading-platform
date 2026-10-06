@@ -99,9 +99,7 @@ def test_signer_accepts_only_exact_route_parameters() -> None:
     body1, _ = sign_exposure_request(reqs[1], 124, "c2VjcmV0")
     assert body0 == "nonce=123"
     assert body1 == "nonce=124&pair=XXBTZEUR"
-    with pytest.raises(
-        KrakenExposureTransportError, match="KRAKEN_EXPOSURE_REQUEST_INVALID"
-    ):
+    with pytest.raises(KrakenExposureTransportError, match="KRAKEN_EXPOSURE_REQUEST_INVALID"):
         sign_exposure_request(replace(reqs[1], parameters=()), 1, "c2VjcmV0")
     cred.close()
 
