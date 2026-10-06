@@ -182,10 +182,10 @@ def qualify_exposure_operator_gate(
             calls += int(exc.network_call_performed)
             raise _GateFailure(ExposureGateReason.KEY_INFO_INVALID) from None
         calls += 1
-        routes = (KrakenPrivateReadRoute.API_KEY_INFO.value,)
         account_identity, payload = _binding(
             observation, credential, expected_account_identity, started_at
         )
+        routes = (KrakenPrivateReadRoute.API_KEY_INFO.value,)
         try:
             capability = parse_api_key_info(payload, credential.reference, observation.observed_at)
         except (KrakenPrivateError, EvidenceError) as exc:

@@ -244,3 +244,17 @@ def test_stale_key_info_response_blocks_exposure(clean_main) -> None:
     assert result.reason_code is ExposureGateReason.KEY_INFO_INVALID
     assert result.total_private_network_calls == 1
     assert exposure.calls == 0
+
+
+def test_wrong_key_info_route_is_not_reported_completed(clean_main) -> None:
+    class WrongRouteTransport(KeyInfoTransport):
+        def post(self, request, credential, nonce_provider):
+            observation = super().post(request, credential, nonce_provider)
+            return replace(observation, route=KrakenPrivateReadRoute.BALANCE)
+
+    loader, key_info, exposure = Loader(), WrongRouteTransport(), ExposureTransport()
+    result = run(loader, key_info, exposure)
+    assert result.reason_code is ExposureGateReason.KEY_INFO_INVALID
+    assert result.total_private_network_calls == 1
+    assert result.completed_routes == ()
+    assert exposure.calls == 0
