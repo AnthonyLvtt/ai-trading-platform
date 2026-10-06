@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.client import HTTPException, HTTPSConnection
+from typing import Protocol
 from urllib.parse import urlencode
 
 from atp.exchange.kraken.private import MonotonicNonceProvider
@@ -45,6 +46,15 @@ class KrakenExposureHTTPObservation:
     payload: object
     request_started_at: datetime
     observed_at: datetime
+
+
+class KrakenExposureTransport(Protocol):
+    def post(
+        self,
+        request: OfflineExposureRequest,
+        credential: EphemeralKrakenCredential,
+        nonce_provider: MonotonicNonceProvider,
+    ) -> KrakenExposureHTTPObservation: ...
 
 
 def _exact_parameters(request: OfflineExposureRequest) -> tuple[tuple[str, str], ...]:
