@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import ssl
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.client import HTTPException, HTTPSConnection
@@ -47,6 +48,7 @@ class KrakenExposureHTTPObservation:
 
 
 def _exact_parameters(request: OfflineExposureRequest) -> tuple[tuple[str, str], ...]:
+    expected: tuple[tuple[str, str], ...]
     if request.route is OfflineExposureRoute.BALANCE_EX:
         expected = ()
     elif request.route is OfflineExposureRoute.TRADE_VOLUME:
@@ -90,7 +92,9 @@ class KrakenExposureHTTPTransport:
 
     __slots__ = ("_clock",)
 
-    def __init__(self, clock=lambda: datetime.now(UTC)) -> None:
+    def __init__(
+        self, clock: Callable[[], datetime] = lambda: datetime.now(UTC)
+    ) -> None:
         self._clock = clock
 
     def post(
