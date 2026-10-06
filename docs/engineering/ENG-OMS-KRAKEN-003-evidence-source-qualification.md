@@ -18,11 +18,13 @@ The accepted source contracts are:
 - valuation price: Kraken public `/0/public/Ticker`, already qualified for
   read-only observation;
 - spendable EUR: Kraken `/0/private/BalanceEx`, **not observation-qualified
-  and not runtime-authorized**;
+  and not qualified as an exposure evidence source**;
 - bounded fee: an explicit Kraken Spot fee-schedule source, **not yet
-  observation-qualified and not runtime-authorized**.
+  observation-qualified and not qualified as an exposure evidence source**.
 
-No new route is added to any transport or signing allowlist.
+No new route is added to any transport or signing allowlist. This registry
+grants no network-call authority; existing read-only transport authority remains
+governed by its own qualification and operational controls.
 
 ## Freshness policy V1
 
