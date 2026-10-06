@@ -18,17 +18,12 @@ from atp.exchange.contracts import (
     VenueId,
     VenueInstrumentMappingEvidence,
 )
-from atp.exchange.execution import ExecutionError, OrderIntent, OrderType
+from atp.exchange.execution import ExecutionError, OrderIntent, OrderType, _decimal_text
 from atp.exchange.read_only import verify_record
 from atp.shared.identity import ContentIdentity
 
 MAX_PUBLIC_PRICE_AGE = timedelta(seconds=10)
 MAX_MAPPING_METADATA_AGE = timedelta(minutes=1)
-
-
-def _decimal_text(value: Decimal) -> str:
-    text = format(value, "f")
-    return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 def _aligned(value: Decimal, increment: Decimal) -> bool:
