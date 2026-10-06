@@ -35,7 +35,8 @@ class ExposureSourceContract(EvidenceRecord):
     mechanism: str
     route: str | None
     observation_qualified: bool
-    runtime_authorized: bool
+    exposure_source_qualified: bool
+    network_authority_granted: bool = False
     real_economic_calls: int = 0
     live: str = "LIVE_FORBIDDEN"
     side_effect_performed: bool = False
@@ -48,9 +49,10 @@ class ExposureSourceContract(EvidenceRecord):
             or not self.mechanism
             or (self.route is not None and not self.route.startswith("/0/"))
             or type(self.observation_qualified) is not bool
-            or type(self.runtime_authorized) is not bool
-            or self.runtime_authorized
+            or type(self.exposure_source_qualified) is not bool
+            or self.exposure_source_qualified
             and not self.observation_qualified
+            or self.network_authority_granted is not False
             or self.real_economic_calls != 0
             or self.live != "LIVE_FORBIDDEN"
             or self.side_effect_performed is not False
@@ -118,7 +120,7 @@ ACCOUNT_BALANCE_SOURCE = ExposureSourceContract(
     mechanism="KRAKEN_PRIVATE_BALANCE",
     route="/0/private/Balance",
     observation_qualified=True,
-    runtime_authorized=True,
+    exposure_source_qualified=True,
 )
 
 ACCOUNT_OPEN_ORDERS_SOURCE = ExposureSourceContract(
@@ -127,7 +129,7 @@ ACCOUNT_OPEN_ORDERS_SOURCE = ExposureSourceContract(
     mechanism="KRAKEN_PRIVATE_OPEN_ORDERS",
     route="/0/private/OpenOrders",
     observation_qualified=True,
-    runtime_authorized=True,
+    exposure_source_qualified=True,
 )
 
 SPENDABLE_EUR_SOURCE = ExposureSourceContract(
@@ -136,7 +138,7 @@ SPENDABLE_EUR_SOURCE = ExposureSourceContract(
     mechanism="KRAKEN_BALANCE_EX",
     route="/0/private/BalanceEx",
     observation_qualified=False,
-    runtime_authorized=False,
+    exposure_source_qualified=False,
 )
 
 BOUNDED_FEE_SOURCE = ExposureSourceContract(
@@ -145,7 +147,7 @@ BOUNDED_FEE_SOURCE = ExposureSourceContract(
     mechanism="KRAKEN_SPOT_FEE_SCHEDULE",
     route=None,
     observation_qualified=False,
-    runtime_authorized=False,
+    exposure_source_qualified=False,
 )
 
 VALUATION_PRICE_SOURCE = ExposureSourceContract(
@@ -154,7 +156,7 @@ VALUATION_PRICE_SOURCE = ExposureSourceContract(
     mechanism="KRAKEN_PUBLIC_TICKER",
     route="/0/public/Ticker",
     observation_qualified=True,
-    runtime_authorized=True,
+    exposure_source_qualified=True,
 )
 
 EXPOSURE_SOURCE_REGISTRY = (
@@ -186,7 +188,7 @@ class ExposureEvidenceQualification(EvidenceRecord):
             or type(self.runtime_pass_qualified) is not bool
             or self.blocking_source_kinds
             != tuple(
-                source.kind for source in EXPOSURE_SOURCE_REGISTRY if not source.runtime_authorized
+                source.kind for source in EXPOSURE_SOURCE_REGISTRY if not source.exposure_source_qualified
             )
             or self.runtime_pass_qualified != (len(self.blocking_source_kinds) == 0)
             or self.real_economic_calls != 0
