@@ -188,7 +188,9 @@ class ExposureEvidenceQualification(EvidenceRecord):
             or type(self.runtime_pass_qualified) is not bool
             or self.blocking_source_kinds
             != tuple(
-                source.kind for source in EXPOSURE_SOURCE_REGISTRY if not source.exposure_source_qualified
+                source.kind
+                for source in EXPOSURE_SOURCE_REGISTRY
+                if not source.exposure_source_qualified
             )
             or self.runtime_pass_qualified != (len(self.blocking_source_kinds) == 0)
             or self.real_economic_calls != 0
