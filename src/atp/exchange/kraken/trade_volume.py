@@ -84,8 +84,14 @@ def parse_offline_trade_volume_fee_bound(payload: object) -> OfflineTradeFeeBoun
         or set(maker_row) != required_fee_fields
     ):
         raise TradeVolumeShapeError("TRADE_VOLUME_FEE_FIELDS_INVALID")
+    taker_min = _percent(taker_row["minfee"])
+    taker_current = _percent(taker_row["fee"])
     taker_max = _percent(taker_row["maxfee"])
+    maker_min = _percent(maker_row["minfee"])
+    maker_current = _percent(maker_row["fee"])
     maker_max = _percent(maker_row["maxfee"])
+    if not (taker_min <= taker_current <= taker_max and maker_min <= maker_current <= maker_max):
+        raise TradeVolumeShapeError("TRADE_VOLUME_FEE_ORDER_INVALID")
     if maker_max > taker_max:
         raise TradeVolumeShapeError("TRADE_VOLUME_FEE_ORDER_INVALID")
     return OfflineTradeFeeBound("XXBTZEUR", taker_max)

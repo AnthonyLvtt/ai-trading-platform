@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from fractions import Fraction
 
 import pytest
 
@@ -114,6 +115,34 @@ def test_trade_volume_uses_maximum_taker_fee_for_limit_candidate() -> None:
     )
     assert evidence.maximum_fee_eur == Decimal("0.247000")
     assert "/0/private/TradeVolume" not in KRAKEN_PRIVATE_READ_ROUTE_ALLOWLIST
+
+
+def test_fee_bound_retains_digits_beyond_default_decimal_precision() -> None:
+    evaluation, decision = approved(SignalKind.LONG_ENTRY)
+    quantity = Decimal("0." + "1" * 40)
+    intent = OrderIntent.create(
+        strategy_evaluation=evaluation,
+        risk_decision=decision,
+        side=OrderSide.BUY,
+        order_type=OrderType.LIMIT,
+        quantity=quantity,
+        limit_price=Decimal("100"),
+    )
+    evidence = bounded_fee_from_offline_trade_volume(
+        payload=trade_volume_payload(),
+        account_identity=ContentIdentity.from_text("account"),
+        intent=intent,
+        observed_at=AT,
+    )
+    assert Fraction(evidence.maximum_fee_eur) == Fraction(quantity) * Fraction(26, 100)
+
+
+def test_fee_parser_rejects_current_rate_above_claimed_maximum() -> None:
+    payload = trade_volume_payload()
+    row = payload["result"]["fees"]["XXBTZEUR"]
+    row["fee"] = "0.2700"
+    with pytest.raises(TradeVolumeShapeError, match="TRADE_VOLUME_FEE_ORDER_INVALID"):
+        parse_offline_trade_volume_fee_bound(payload)
 
 
 def test_fee_parser_rejects_pair_or_fee_shapes_that_cannot_bound_btc_eur() -> None:

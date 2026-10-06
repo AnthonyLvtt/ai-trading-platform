@@ -7,7 +7,7 @@ signing, nonce generation, network transport, or runtime source authority.
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, DecimalException, Inexact, localcontext
 
 from atp.exchange.contracts import BTC_EUR, VenueId
 from atp.exchange.execution import OrderIntent, OrderSide, OrderType
@@ -73,8 +73,14 @@ def bounded_fee_from_offline_trade_volume(
     ):
         raise ExposureError("BOUNDED_FEE_SOURCE_CANDIDATE_INVALID")
     bound = parse_offline_trade_volume_fee_bound(payload)
-    notional = intent.quantity * intent.limit_price
-    maximum_fee_eur = notional * bound.taker_max_fee_percent / Decimal("100")
+    try:
+        with localcontext() as context:
+            context.prec = 100
+            context.traps[Inexact] = True
+            notional = intent.quantity * intent.limit_price
+            maximum_fee_eur = notional * bound.taker_max_fee_percent / Decimal("100")
+    except DecimalException:
+        raise ExposureError("BOUNDED_FEE_SOURCE_ARITHMETIC_UNSAFE") from None
     return BoundedFeeEvidence(
         venue=VenueId.KRAKEN,
         account_identity=account_identity,
