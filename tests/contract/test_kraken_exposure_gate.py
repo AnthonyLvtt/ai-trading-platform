@@ -167,7 +167,7 @@ def test_source_must_match_before_credential_or_network(clean_main, monkeypatch)
 @pytest.mark.parametrize(
     ("field", "reason"),
     [
-        ("apiKey", ExposureGateReason.API_KEY_FIELD_INVALID),
+        ("apiKey", ExposureGateReason.API_KEY_FIELD_MISSING),
         ("iban", ExposureGateReason.IIBAN_FIELD_INVALID),
     ],
 )
@@ -176,6 +176,15 @@ def test_missing_binding_field_fails_before_exposure(clean_main, field, reason) 
     del key_info.payload["result"][field]
     result = run(loader, key_info, exposure)
     assert result.reason_code is reason
+    assert result.total_private_network_calls == 1
+    assert exposure.calls == 0
+
+
+def test_non_string_api_key_field_is_sanitized(clean_main) -> None:
+    loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
+    key_info.payload["result"]["apiKey"] = None
+    result = run(loader, key_info, exposure)
+    assert result.reason_code is ExposureGateReason.API_KEY_FIELD_TYPE_INVALID
     assert result.total_private_network_calls == 1
     assert exposure.calls == 0
 
