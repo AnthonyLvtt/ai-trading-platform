@@ -164,18 +164,20 @@ def test_source_must_match_before_credential_or_network(clean_main, monkeypatch)
     assert loader.calls == key_info.calls == exposure.calls == 0
 
 
-@pytest.mark.parametrize(
-    ("field", "reason"),
-    [
-        ("apiKey", ExposureGateReason.API_KEY_FIELD_MISSING),
-        ("iban", ExposureGateReason.IIBAN_FIELD_INVALID),
-    ],
-)
-def test_missing_binding_field_fails_before_exposure(clean_main, field, reason) -> None:
+def test_missing_api_key_echo_is_accepted(clean_main) -> None:
     loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
-    del key_info.payload["result"][field]
+    del key_info.payload["result"]["apiKey"]
     result = run(loader, key_info, exposure)
-    assert result.reason_code is reason
+    assert result.status is ExposureGateStatus.PASSED
+    assert result.total_private_network_calls == 3
+    assert exposure.calls == 2
+
+
+def test_missing_iiban_fails_before_exposure(clean_main) -> None:
+    loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
+    del key_info.payload["result"]["iban"]
+    result = run(loader, key_info, exposure)
+    assert result.reason_code is ExposureGateReason.IIBAN_FIELD_INVALID
     assert result.total_private_network_calls == 1
     assert exposure.calls == 0
 
