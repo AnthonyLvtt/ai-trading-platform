@@ -164,14 +164,31 @@ def test_source_must_match_before_credential_or_network(clean_main, monkeypatch)
     assert loader.calls == key_info.calls == exposure.calls == 0
 
 
-@pytest.mark.parametrize("field", ["apiKey", "iban"])
-def test_missing_binding_field_fails_before_exposure(clean_main, field) -> None:
+@pytest.mark.parametrize(
+    ("field", "reason"),
+    [
+        ("apiKey", ExposureGateReason.API_KEY_FIELD_INVALID),
+        ("iban", ExposureGateReason.IIBAN_FIELD_INVALID),
+    ],
+)
+def test_missing_binding_field_fails_before_exposure(clean_main, field, reason) -> None:
     loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
     del key_info.payload["result"][field]
     result = run(loader, key_info, exposure)
-    assert result.reason_code is ExposureGateReason.ACCOUNT_BINDING_INVALID
+    assert result.reason_code is reason
     assert result.total_private_network_calls == 1
     assert exposure.calls == 0
+
+
+def test_invalid_iiban_format_is_sanitized(clean_main) -> None:
+    loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
+    key_info.payload["result"]["iban"] = "invalid!"
+    result = run(loader, key_info, exposure)
+    assert result.reason_code is ExposureGateReason.IIBAN_FORMAT_INVALID
+    assert result.total_private_network_calls == 1
+    assert exposure.calls == 0
+    serialized = json.dumps(encoded(result), sort_keys=True)
+    assert "invalid!" not in serialized
 
 
 def test_foreign_account_or_key_reports_sanitized_mismatch(clean_main) -> None:

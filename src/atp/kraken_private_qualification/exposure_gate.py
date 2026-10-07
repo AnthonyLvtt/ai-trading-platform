@@ -95,13 +95,22 @@ def _binding(
     result = payload["result"]
     api_key = result.get("apiKey")
     iiban = result.get("iban")
-    if type(api_key) is not str or type(iiban) is not str:
-        raise _GateFailure(ExposureGateReason.ACCOUNT_BINDING_INVALID)
+    if type(api_key) is not str:
+        raise _GateFailure(ExposureGateReason.API_KEY_FIELD_INVALID)
+    if type(iiban) is not str:
+        raise _GateFailure(ExposureGateReason.IIBAN_FIELD_INVALID)
     try:
-        key_matches = hmac.compare_digest(api_key.encode("ascii"), credential.api_key_bytes())
+        encoded_api_key = api_key.encode("ascii")
+    except UnicodeError:
+        raise _GateFailure(ExposureGateReason.API_KEY_FIELD_INVALID) from None
+    try:
         account_identity = account_identity_from_iiban(iiban)
-    except (UnicodeError, EvidenceError, KrakenCredentialError):
-        raise _GateFailure(ExposureGateReason.ACCOUNT_BINDING_INVALID) from None
+    except EvidenceError:
+        raise _GateFailure(ExposureGateReason.IIBAN_FORMAT_INVALID) from None
+    try:
+        key_matches = hmac.compare_digest(encoded_api_key, credential.api_key_bytes())
+    except KrakenCredentialError:
+        raise _GateFailure(ExposureGateReason.CREDENTIAL_INVALID) from None
     if not key_matches:
         raise _GateFailure(ExposureGateReason.API_KEY_MISMATCH)
     if account_identity != expected_account_identity:
