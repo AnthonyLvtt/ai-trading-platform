@@ -174,15 +174,23 @@ def test_missing_binding_field_fails_before_exposure(clean_main, field) -> None:
     assert exposure.calls == 0
 
 
-def test_foreign_account_or_key_fails_before_exposure(clean_main) -> None:
+def test_foreign_account_or_key_reports_sanitized_mismatch(clean_main) -> None:
     loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
     wrong = run(loader, key_info, exposure, account=ContentIdentity.from_text("foreign"))
-    assert wrong.reason_code is ExposureGateReason.ACCOUNT_BINDING_INVALID
+    assert wrong.reason_code is ExposureGateReason.IIBAN_MISMATCH
+    assert wrong.total_private_network_calls == 1
     assert exposure.calls == 0
+
     key_info.payload["result"]["apiKey"] = "foreign-key"
     wrong_key = run(Loader(), key_info, exposure)
-    assert wrong_key.reason_code is ExposureGateReason.ACCOUNT_BINDING_INVALID
+    assert wrong_key.reason_code is ExposureGateReason.API_KEY_MISMATCH
+    assert wrong_key.total_private_network_calls == 1
     assert exposure.calls == 0
+
+    serialized = json.dumps(encoded(wrong_key), sort_keys=True)
+    assert "synthetic-public-key" not in serialized
+    assert "foreign-key" not in serialized
+    assert IIBAN not in serialized
 
 
 def test_extra_permission_blocks_before_exposure(clean_main) -> None:

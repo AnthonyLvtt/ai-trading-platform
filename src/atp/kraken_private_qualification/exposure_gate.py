@@ -102,8 +102,10 @@ def _binding(
         account_identity = account_identity_from_iiban(iiban)
     except (UnicodeError, EvidenceError, KrakenCredentialError):
         raise _GateFailure(ExposureGateReason.ACCOUNT_BINDING_INVALID) from None
-    if not key_matches or account_identity != expected_account_identity:
-        raise _GateFailure(ExposureGateReason.ACCOUNT_BINDING_INVALID)
+    if not key_matches:
+        raise _GateFailure(ExposureGateReason.API_KEY_MISMATCH)
+    if account_identity != expected_account_identity:
+        raise _GateFailure(ExposureGateReason.IIBAN_MISMATCH)
     return account_identity, payload
 
 
