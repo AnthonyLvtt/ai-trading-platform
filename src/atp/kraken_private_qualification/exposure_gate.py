@@ -93,16 +93,18 @@ def _binding(
     ):
         raise _GateFailure(ExposureGateReason.KEY_INFO_INVALID)
     result = payload["result"]
-    api_key = result.get("apiKey")
+    if "apiKey" not in result:
+        raise _GateFailure(ExposureGateReason.API_KEY_FIELD_MISSING)
+    api_key = result["apiKey"]
     iiban = result.get("iban")
     if type(api_key) is not str:
-        raise _GateFailure(ExposureGateReason.API_KEY_FIELD_INVALID)
+        raise _GateFailure(ExposureGateReason.API_KEY_FIELD_TYPE_INVALID)
     if type(iiban) is not str:
         raise _GateFailure(ExposureGateReason.IIBAN_FIELD_INVALID)
     try:
         encoded_api_key = api_key.encode("ascii")
     except UnicodeError:
-        raise _GateFailure(ExposureGateReason.API_KEY_FIELD_INVALID) from None
+        raise _GateFailure(ExposureGateReason.API_KEY_FIELD_TYPE_INVALID) from None
     try:
         account_identity = account_identity_from_iiban(iiban)
     except EvidenceError:
