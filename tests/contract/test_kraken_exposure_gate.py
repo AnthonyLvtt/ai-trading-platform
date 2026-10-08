@@ -234,7 +234,7 @@ def test_missing_credit_field_fails_closed_after_balance_ex(clean_main) -> None:
     loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
     del exposure.payloads[0]["result"]["ZEUR"]["credit_used"]
     result = run(loader, key_info, exposure)
-    assert result.reason_code is ExposureGateReason.EXPOSURE_INVALID
+    assert result.reason_code is ExposureGateReason.EXPOSURE_EVIDENCE_INVALID
     assert result.total_private_network_calls == 2
     assert exposure.calls == 1
     assert result.source_identity is None
@@ -294,3 +294,16 @@ def test_wrong_key_info_route_is_not_reported_completed(clean_main) -> None:
     assert result.total_private_network_calls == 1
     assert result.completed_routes == ()
     assert exposure.calls == 0
+
+
+def test_kraken_api_rejection_reports_sanitized_reason(clean_main) -> None:
+    loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
+    exposure.payloads = (
+        {"error": ["EGeneral:Permission denied"], "result": {}},
+        exposure.payloads[1],
+    )
+    result = run(loader, key_info, exposure)
+    assert result.reason_code is ExposureGateReason.EXPOSURE_API_REJECTED
+    assert result.total_private_network_calls == 2
+    assert exposure.calls == 1
+    assert "Permission denied" not in json.dumps(encoded(result))
