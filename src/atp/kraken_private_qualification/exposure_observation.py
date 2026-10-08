@@ -107,7 +107,7 @@ def _proof(
             rows = parse_offline_extended_balance(observation.payload)
             eur = tuple(row for row in rows if row.asset == "EUR")
             if len(eur) != 1:
-                raise _OfflineFailure(OfflineExposureReason.OBSERVATION_PAYLOAD_INVALID)
+                raise _OfflineFailure(OfflineExposureReason.BALANCE_EUR_MISSING)
             kind = OfflineExposureValueKind.SPENDABLE_EUR
             value = eur[0].available
         else:
@@ -125,7 +125,14 @@ def _proof(
             source_identity=ContentIdentity.from_canonical(observation.payload),
             observed_at=observation.observed_at,
         )
-    except (ExtendedBalanceShapeError, TradeVolumeShapeError, EvidenceError, TypeError, ValueError):
+    except ExtendedBalanceShapeError as exc:
+        reason = OfflineExposureReason.OBSERVATION_PAYLOAD_INVALID
+        if str(exc) == "BALANCE_EX_ASSET_UNSUPPORTED":
+            reason = OfflineExposureReason.BALANCE_ASSET_UNSUPPORTED
+        elif str(exc) == "BALANCE_EX_FIELDS_INCOMPLETE":
+            reason = OfflineExposureReason.BALANCE_FIELDS_INCOMPLETE
+        raise _OfflineFailure(reason) from None
+    except (TradeVolumeShapeError, EvidenceError, TypeError, ValueError):
         raise _OfflineFailure(OfflineExposureReason.OBSERVATION_PAYLOAD_INVALID) from None
 
 
