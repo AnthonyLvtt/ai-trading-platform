@@ -101,7 +101,7 @@ def _binding(
         account_identity = account_identity_from_iiban(iiban)
     except EvidenceError:
         raise _GateFailure(ExposureGateReason.IIBAN_FORMAT_INVALID) from None
-    if api_key is not None:
+    if "apiKey" in result:
         if type(api_key) is not str:
             raise _GateFailure(ExposureGateReason.API_KEY_FIELD_TYPE_INVALID)
         try:
