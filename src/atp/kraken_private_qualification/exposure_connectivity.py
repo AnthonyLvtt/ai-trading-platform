@@ -32,8 +32,8 @@ from atp.kraken_private_qualification.exposure_observation import (
 )
 from atp.kraken_private_qualification.exposure_observation_model import (
     OfflineExposureObservation,
-    OfflineExposureRequest,
     OfflineExposureReason,
+    OfflineExposureRequest,
     OfflineExposureRoute,
     SanitizedExposureObservation,
 )
