@@ -1,39 +1,82 @@
 # ENG-EXCH-KRAKEN-023 — exposure observation operational gate
 
-Status: **offline implementation prepared; real private observation not authorized**.
+Status: **read-only gate implemented; financial qualification incomplete; no economic authority**.
 
-The sole prepared operator entry is `qualify_exposure_operator_gate`. Its inputs
-are an exact reviewed `main` SHA, the approved account identity derived from an
-IIBAN known independently to the operator, and injected credential and transport
-providers. It is not wired to a command or OMS runtime path. No production
-credential or private HTTP call is used in its tests.
+The operator gate `qualify_exposure_operator_gate` binds an exact reviewed
+source SHA, independently approved account identity, ephemeral credential,
+least-privilege capability and bounded private observations.
 
-After checking exact clean `main`, the gate loads one ephemeral credential. It
-makes one exact `GetApiKeyInfo` request through the existing bounded read-only
-transport. The response must identify the same API key and account IIBAN as
-the locally loaded key and the preapproved account identity. The IIBAN is
-normalized, domain-separated and hashed; its text is never placed in a result.
-Missing or mismatched `apiKey` or `iban` fails before any exposure request.
-The returned permissions must be exactly the existing least-privilege read-only
-set. The resulting capability must remain fresh for the exposure runner.
+The gate first performs one exact `GetApiKeyInfo` read and verifies account,
+credential and permission bindings. Authentication success and permission
+validation are prerequisites only; they are not financial qualification.
 
-The gate then invokes the existing bounded runner for exactly `BalanceEx` and
-`TradeVolume`, in order, with the same credential, capability and derived
-account identity. It checks source identity again after all three reads. The
-result contains only fixed reason codes, identities, timestamps, the completed
-route prefix and a total call count from zero to three. It contains no raw
-response, API key, IIBAN, nonce or signature. Any missing `credit` or
-`credit_used` field in `BalanceEx` still fails closed. Partial results never
-qualify the source.
+The exposure stage begins with `BalanceEx`.
 
-The account binding relies on Kraken's documented `GetApiKeyInfo` fields:
-[`apiKey` and `iban`](https://docs.kraken.com/api/docs/rest-api/get-api-key-info).
-The approved account identity must be established independently before running
-the gate; deriving it from the just-returned response would remove the
-cross-check. A simulated `PASSED` result proves the software sequence only.
-It does not authorize or qualify a real observation, and cannot enable OMS
-runtime `PASS`. A future read-only run requires separate explicit operational
-authorization tied to an exact merged SHA and locally loaded credentials.
+A full financial path may continue to `TradeVolume` only when BalanceEx produces
+a valid numeric spendable-EUR proof.
+
+A syntactically valid BalanceEx response with no EUR row is now represented as:
+
+```text
+status = INCOMPLETE
+reason_code = EXPOSURE_GATE_EUR_BALANCE_NOT_OBSERVED
+completed_routes = [
+  "/0/private/GetApiKeyInfo",
+  "/0/private/BalanceEx"
+]
+total_private_network_calls = 2
+runtime_pass_qualified = false
+TradeVolume = not executed
+```
+
+Absence of the EUR row is not interpreted as zero and does not qualify financial
+exposure.
+
+Malformed rows, missing required fields, unsupported assets and other invalid
+evidence remain failures. The specialized sanitized diagnostics introduced by
+PR #65 remain available for malformed BalanceEx shapes, including:
+
+- `EXPOSURE_GATE_BALANCE_EUR_MISSING` for the pre-ENG-KRAKEN-EXPOSURE-002
+  missing-EUR failure behavior preserved in historical evidence;
+- `EXPOSURE_GATE_BALANCE_FIELDS_INCOMPLETE`;
+- `EXPOSURE_GATE_BALANCE_ASSET_UNSUPPORTED`;
+- the generic `EXPOSURE_GATE_EXPOSURE_EVIDENCE_INVALID` where still applicable.
+
+## Historical real read-only attempt — 2026-10-08
+
+Against baseline:
+
+```text
+ce068baca8df94f09181fd060f746193498d2598
+```
+
+the authorized bounded read-only attempt produced the historical result:
+
+```text
+status = FAILED
+reason_code = EXPOSURE_GATE_BALANCE_EUR_MISSING
+runtime_pass_qualified = false
+completed_routes = ["/0/private/GetApiKeyInfo"]
+total_private_network_calls = 2
+real_economic_calls = 0
+side_effect_performed = false
+LIVE = LIVE_FORBIDDEN
+```
+
+`BalanceEx` was requested but did not produce qualified financial evidence.
+`TradeVolume` was not executed.
+
+This historical failure is retained as evidence of the then-current contract. It
+is not rewritten after ENG-KRAKEN-EXPOSURE-002.
+
+The account binding may use an independently known IIBAN only to derive the
+approved opaque account identity. Raw IIBAN text, API keys, secrets, signatures,
+nonces, private payloads and real financial amounts must not appear in persisted
+results or documentation examples.
+
+Connectivity, least-privilege permissions, HTTP success, route observation,
+financial evidence, operational qualification and real-trading authorization
+remain separate gates.
 
 `REAL_ECONOMIC_CALLS = 0`; `runtime_pass_qualified = False`;
 `LIVE = LIVE_FORBIDDEN`.
