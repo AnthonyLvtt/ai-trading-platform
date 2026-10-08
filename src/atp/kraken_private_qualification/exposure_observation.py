@@ -98,6 +98,15 @@ def _source_before(root: Path, expected_sha: str) -> SourceTree:
     return source
 
 
+def _source_after(root: Path, source: SourceTree) -> None:
+    try:
+        after = inspect_source(root)
+    except (ReleaseError, OSError):
+        raise _OfflineFailure(OfflineExposureReason.SOURCE_INVALID) from None
+    if after != source or not after.clean:
+        raise _OfflineFailure(OfflineExposureReason.SOURCE_INVALID)
+
+
 def _proof(
     observation: OfflineExposureObservation,
     request: OfflineExposureRequest,
@@ -106,10 +115,12 @@ def _proof(
         if request.route is OfflineExposureRoute.BALANCE_EX:
             rows = parse_offline_extended_balance(observation.payload)
             eur = tuple(row for row in rows if row.asset == "EUR")
-            if len(eur) != 1:
-                raise _OfflineFailure(OfflineExposureReason.BALANCE_EUR_MISSING)
-            kind = OfflineExposureValueKind.SPENDABLE_EUR
-            value = eur[0].available
+            if not eur:
+                kind = OfflineExposureValueKind.EUR_BALANCE_NOT_OBSERVED
+                value = None
+            else:
+                kind = OfflineExposureValueKind.SPENDABLE_EUR
+                value = eur[0].available
         else:
             bound = parse_offline_trade_volume_fee_bound(observation.payload)
             kind = OfflineExposureValueKind.TAKER_MAX_FEE_PERCENT
@@ -210,6 +221,24 @@ def qualify_offline_exposure_observations(
                 raise _OfflineFailure(OfflineExposureReason.OBSERVATION_SEQUENCE_INVALID)
             observed_times.append(observation.observed_at)
             proofs = (*proofs, _proof(observation, request))
+            if proofs[-1].value_kind is OfflineExposureValueKind.EUR_BALANCE_NOT_OBSERVED:
+                moment = observation.observed_at
+                if moment < capability.observed_at or moment - capability.observed_at > timedelta(
+                    seconds=30
+                ):
+                    raise _OfflineFailure(OfflineExposureReason.OBSERVATION_SEQUENCE_INVALID)
+                _source_after(source_root, source)
+                return _result(
+                    status=OfflineExposureStatus.INCOMPLETE,
+                    reason=OfflineExposureReason.EUR_BALANCE_NOT_OBSERVED,
+                    source=source,
+                    reference=bound_reference,
+                    capability=bound_capability,
+                    account_identity=bound_account,
+                    requests=requests,
+                    proofs=proofs,
+                    offline_observations=count,
+                )
         if (
             observed_times[1] < observed_times[0]
             or observed_times[1] - observed_times[0] > timedelta(seconds=30)
@@ -220,12 +249,7 @@ def qualify_offline_exposure_observations(
             )
         ):
             raise _OfflineFailure(OfflineExposureReason.OBSERVATION_SEQUENCE_INVALID)
-        try:
-            after = inspect_source(source_root)
-        except (ReleaseError, OSError):
-            raise _OfflineFailure(OfflineExposureReason.SOURCE_INVALID) from None
-        if after != source or not after.clean:
-            raise _OfflineFailure(OfflineExposureReason.SOURCE_INVALID)
+        _source_after(source_root, source)
         return _result(
             status=OfflineExposureStatus.PASSED,
             reason=OfflineExposureReason.OFFLINE_EXPOSURE_CONTRACT_QUALIFIED,

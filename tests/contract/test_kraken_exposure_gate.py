@@ -326,10 +326,30 @@ def test_balanceex_unsupported_asset_reports_sanitized_reason(clean_main) -> Non
     assert "123456.78" not in serialized
 
 
-def test_balanceex_missing_eur_reports_sanitized_reason(clean_main) -> None:
+def test_balanceex_missing_eur_reports_incomplete_diagnostic(clean_main) -> None:
     loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
     del exposure.payloads[0]["result"]["ZEUR"]
     result = run(loader, key_info, exposure)
-    assert result.reason_code is ExposureGateReason.BALANCE_EUR_MISSING
+    assert result.status is ExposureGateStatus.INCOMPLETE
+    assert result.reason_code is ExposureGateReason.EUR_BALANCE_NOT_OBSERVED
     assert result.total_private_network_calls == 2
     assert exposure.calls == 1
+    assert result.completed_routes == ("/0/private/GetApiKeyInfo", "/0/private/BalanceEx")
+    assert result.source_identity == clean_main.content_identity
+    assert result.runtime_pass_qualified is False
+
+
+def test_missing_eur_diagnostic_does_not_survive_gate_source_change(
+    clean_main, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "atp.kraken_private_qualification.exposure_gate.inspect_source",
+        lambda root: replace(clean_main, source_commit_sha="b" * 40),
+    )
+    loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
+    del exposure.payloads[0]["result"]["ZEUR"]
+    result = run(loader, key_info, exposure)
+    assert result.status is ExposureGateStatus.FAILED
+    assert result.reason_code is ExposureGateReason.SOURCE_INVALID
+    assert result.total_private_network_calls == 2
+    assert result.source_identity is None

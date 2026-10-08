@@ -11,6 +11,7 @@ from atp.exchange.contracts import VenueId
 from atp.exchange.read_only import EvidenceError, EvidenceRecord
 from atp.kraken_private_qualification.exposure_observation_model import (
     OfflineExposureRoute,
+    OfflineExposureValueKind,
     SanitizedExposureObservation,
 )
 from atp.shared.identity import ContentIdentity
@@ -18,6 +19,7 @@ from atp.shared.identity import ContentIdentity
 
 class ExposureConnectivityStatus(StrEnum):
     PASSED = "PASSED"
+    INCOMPLETE = "INCOMPLETE"
     FAILED = "FAILED"
 
 
@@ -33,6 +35,7 @@ class ExposureConnectivityReason(StrEnum):
     BALANCE_ASSET_UNSUPPORTED = "EXPOSURE_BALANCE_ASSET_UNSUPPORTED"
     BALANCE_FIELDS_INCOMPLETE = "EXPOSURE_BALANCE_FIELDS_INCOMPLETE"
     BALANCE_EUR_MISSING = "EXPOSURE_BALANCE_EUR_MISSING"
+    EUR_BALANCE_NOT_OBSERVED = "EXPOSURE_EUR_BALANCE_NOT_OBSERVED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +65,7 @@ class ExposureConnectivityResult(EvidenceRecord):
     def __post_init__(self) -> None:
         routes = (OfflineExposureRoute.BALANCE_EX, OfflineExposureRoute.TRADE_VOLUME)
         passed = self.status is ExposureConnectivityStatus.PASSED
+        incomplete = self.status is ExposureConnectivityStatus.INCOMPLETE
         source_valid = (
             type(self.source_commit_sha) is str
             and re.fullmatch(r"[0-9a-f]{40}", self.source_commit_sha) is not None
@@ -101,6 +105,9 @@ class ExposureConnectivityResult(EvidenceRecord):
                     or self.completed_routes != routes
                     or len(self.request_identities) != 2
                     or len(self.proofs) != 2
+                    or self.proofs[0].value_kind is not OfflineExposureValueKind.SPENDABLE_EUR
+                    or self.proofs[1].value_kind
+                    is not OfflineExposureValueKind.TAKER_MAX_FEE_PERCENT
                     or not source_valid
                     or any(
                         type(value) is not ContentIdentity
@@ -121,7 +128,30 @@ class ExposureConnectivityResult(EvidenceRecord):
                     )
                 )
             )
+            or (
+                incomplete
+                and (
+                    self.reason_code is not ExposureConnectivityReason.EUR_BALANCE_NOT_OBSERVED
+                    or self.private_network_calls != 1
+                    or self.completed_routes != (OfflineExposureRoute.BALANCE_EX,)
+                    or len(self.request_identities) != 2
+                    or len(self.proofs) != 1
+                    or self.proofs[0].value_kind
+                    is not OfflineExposureValueKind.EUR_BALANCE_NOT_OBSERVED
+                    or self.proofs[0].value is not None
+                    or self.proofs[0].request_identity != self.request_identities[0]
+                    or self.proofs[0].credential_reference_identity
+                    != self.credential_reference_identity
+                    or self.proofs[0].capability_identity != self.capability_identity
+                    or self.proofs[0].account_identity != self.account_identity
+                    or not source_valid
+                )
+            )
             or (not passed and self.reason_code is ExposureConnectivityReason.QUALIFIED)
+            or (
+                not incomplete
+                and self.reason_code is ExposureConnectivityReason.EUR_BALANCE_NOT_OBSERVED
+            )
         ):
             raise EvidenceError("EXPOSURE_CONNECTIVITY_RESULT_INVALID")
         EvidenceRecord.__post_init__(self)

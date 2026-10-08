@@ -62,10 +62,11 @@ def _amount(value: object) -> Decimal:
 
 
 def parse_offline_extended_balance(payload: object) -> tuple[OfflineExtendedBalance, ...]:
-    """Parse a synthetic BTC/EUR fixture; missing credit facts fail closed.
+    """Parse observed BTC/EUR rows without synthesizing absent assets.
 
     Kraken's public example omits credit fields. We do not infer zero from an
-    omission, so such a response cannot establish spendable funds here.
+    omission, so such a response cannot establish spendable funds here. An
+    absent EUR row remains absent; callers classify it separately.
     """
     if (
         type(payload) is not dict

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -90,3 +91,22 @@ def test_command_rejects_confirmation_without_gate(monkeypatch) -> None:
     )
     with pytest.raises(SystemExit):
         module.main()
+
+
+def test_incomplete_eur_diagnostic_has_distinct_nonzero_exit(monkeypatch, capsys) -> None:
+    prompts = iter((IIBAN, module.CONFIRMATION))
+    monkeypatch.setattr(module.getpass, "getpass", lambda prompt: next(prompts))
+    incomplete = replace(
+        result(),
+        status=ExposureGateStatus.INCOMPLETE,
+        reason_code=ExposureGateReason.EUR_BALANCE_NOT_OBSERVED,
+        completed_routes=("/0/private/GetApiKeyInfo", "/0/private/BalanceEx"),
+        total_private_network_calls=2,
+    )
+    monkeypatch.setattr(module, "qualify_exposure_operator_gate", lambda **kwargs: incomplete)
+    monkeypatch.setattr("sys.argv", ["qualify_kraken_exposure.py", "--expected-source-sha", SHA])
+    assert module.main() == 2
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "INCOMPLETE"
+    assert output["reason_code"] == "EXPOSURE_GATE_EUR_BALANCE_NOT_OBSERVED"
+    assert output["runtime_pass_qualified"] is False

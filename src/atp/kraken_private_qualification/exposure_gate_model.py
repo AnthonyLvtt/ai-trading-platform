@@ -14,6 +14,7 @@ from atp.shared.identity import ContentIdentity
 
 class ExposureGateStatus(StrEnum):
     PASSED = "PASSED"
+    INCOMPLETE = "INCOMPLETE"
     FAILED = "FAILED"
 
 
@@ -39,6 +40,7 @@ class ExposureGateReason(StrEnum):
     BALANCE_ASSET_UNSUPPORTED = "EXPOSURE_GATE_BALANCE_ASSET_UNSUPPORTED"
     BALANCE_FIELDS_INCOMPLETE = "EXPOSURE_GATE_BALANCE_FIELDS_INCOMPLETE"
     BALANCE_EUR_MISSING = "EXPOSURE_GATE_BALANCE_EUR_MISSING"
+    EUR_BALANCE_NOT_OBSERVED = "EXPOSURE_GATE_EUR_BALANCE_NOT_OBSERVED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +73,7 @@ class ExposureGateResult(EvidenceRecord):
             "/0/private/TradeVolume",
         )
         passed = self.status is ExposureGateStatus.PASSED
+        incomplete = self.status is ExposureGateStatus.INCOMPLETE
         source_valid = (
             type(self.source_commit_sha) is str
             and re.fullmatch(r"[0-9a-f]{40}", self.source_commit_sha) is not None
@@ -115,7 +118,26 @@ class ExposureGateResult(EvidenceRecord):
                     )
                 )
             )
+            or (
+                incomplete
+                and (
+                    self.reason_code is not ExposureGateReason.EUR_BALANCE_NOT_OBSERVED
+                    or self.total_private_network_calls != 2
+                    or self.completed_routes != expected_routes[:2]
+                    or not source_valid
+                    or any(
+                        type(value) is not ContentIdentity
+                        for value in (
+                            self.account_identity,
+                            self.credential_reference_identity,
+                            self.capability_identity,
+                            self.exposure_result_identity,
+                        )
+                    )
+                )
+            )
             or (not passed and self.reason_code is ExposureGateReason.QUALIFIED)
+            or (not incomplete and self.reason_code is ExposureGateReason.EUR_BALANCE_NOT_OBSERVED)
         ):
             raise EvidenceError("EXPOSURE_GATE_RESULT_INVALID")
         EvidenceRecord.__post_init__(self)
