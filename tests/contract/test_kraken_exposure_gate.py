@@ -333,4 +333,3 @@ def test_balanceex_missing_eur_reports_sanitized_reason(clean_main) -> None:
     assert result.reason_code is ExposureGateReason.BALANCE_EUR_MISSING
     assert result.total_private_network_calls == 2
     assert exposure.calls == 1
-
