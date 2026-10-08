@@ -36,6 +36,7 @@ from atp.kraken_private_qualification.exposure_connectivity import (
 )
 from atp.kraken_private_qualification.exposure_connectivity_model import (
     ExposureConnectivityStatus,
+    ExposureConnectivityReason,
 )
 from atp.kraken_private_qualification.exposure_gate_model import (
     ExposureGateReason,
@@ -220,7 +221,13 @@ def qualify_exposure_operator_gate(
         routes += tuple(route.value for route in exposure.completed_routes)
         exposure_result_identity = exposure.content_identity
         if exposure.status is not ExposureConnectivityStatus.PASSED:
-            raise _GateFailure(ExposureGateReason.EXPOSURE_INVALID)
+            reasons = {
+                ExposureConnectivityReason.API_REJECTED: ExposureGateReason.EXPOSURE_API_REJECTED,
+                ExposureConnectivityReason.EVIDENCE_INVALID: ExposureGateReason.EXPOSURE_EVIDENCE_INVALID,
+                ExposureConnectivityReason.RESPONSE_INVALID: ExposureGateReason.EXPOSURE_RESPONSE_INVALID,
+                ExposureConnectivityReason.NETWORK_FAILURE: ExposureGateReason.EXPOSURE_NETWORK_FAILURE,
+            }
+            raise _GateFailure(reasons.get(exposure.reason_code, ExposureGateReason.EXPOSURE_INVALID))
         try:
             after = inspect_source(source_root)
         except (ReleaseError, OSError):
