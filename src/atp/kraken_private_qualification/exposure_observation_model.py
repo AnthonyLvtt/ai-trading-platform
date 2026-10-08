@@ -20,11 +20,13 @@ class OfflineExposureRoute(StrEnum):
 
 class OfflineExposureValueKind(StrEnum):
     SPENDABLE_EUR = "SPENDABLE_EUR"
+    EUR_BALANCE_NOT_OBSERVED = "EUR_BALANCE_NOT_OBSERVED"
     TAKER_MAX_FEE_PERCENT = "TAKER_MAX_FEE_PERCENT"
 
 
 class OfflineExposureStatus(StrEnum):
     PASSED = "PASSED"
+    INCOMPLETE = "INCOMPLETE"
     FAILED = "FAILED"
 
 
@@ -37,6 +39,7 @@ class OfflineExposureReason(StrEnum):
     BALANCE_ASSET_UNSUPPORTED = "BALANCE_ASSET_UNSUPPORTED"
     BALANCE_FIELDS_INCOMPLETE = "BALANCE_FIELDS_INCOMPLETE"
     BALANCE_EUR_MISSING = "BALANCE_EUR_MISSING"
+    EUR_BALANCE_NOT_OBSERVED = "EUR_BALANCE_NOT_OBSERVED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +93,7 @@ class OfflineExposureObservation:
 class SanitizedExposureObservation(EvidenceRecord):
     route: OfflineExposureRoute
     value_kind: OfflineExposureValueKind
-    value: Decimal
+    value: Decimal | None
     request_identity: ContentIdentity
     credential_reference_identity: ContentIdentity
     capability_identity: ContentIdentity
@@ -100,18 +103,30 @@ class SanitizedExposureObservation(EvidenceRecord):
     side_effect_performed: bool = False
 
     def __post_init__(self) -> None:
-        kind_for_route = {
-            OfflineExposureRoute.BALANCE_EX: OfflineExposureValueKind.SPENDABLE_EUR,
-            OfflineExposureRoute.TRADE_VOLUME: OfflineExposureValueKind.TAKER_MAX_FEE_PERCENT,
+        kinds_for_route = {
+            OfflineExposureRoute.BALANCE_EX: {
+                OfflineExposureValueKind.SPENDABLE_EUR,
+                OfflineExposureValueKind.EUR_BALANCE_NOT_OBSERVED,
+            },
+            OfflineExposureRoute.TRADE_VOLUME: {OfflineExposureValueKind.TAKER_MAX_FEE_PERCENT},
         }
         if (
             type(self.route) is not OfflineExposureRoute
-            or self.value_kind is not kind_for_route[self.route]
-            or type(self.value) is not Decimal
-            or not self.value.is_finite()
-            or self.value < 0
+            or type(self.value_kind) is not OfflineExposureValueKind
+            or self.value_kind not in kinds_for_route[self.route]
+            or (
+                self.value_kind is OfflineExposureValueKind.EUR_BALANCE_NOT_OBSERVED
+                and self.value is not None
+            )
+            or (
+                self.value_kind is not OfflineExposureValueKind.EUR_BALANCE_NOT_OBSERVED
+                and (
+                    type(self.value) is not Decimal or not self.value.is_finite() or self.value < 0
+                )
+            )
             or (
                 self.value_kind is OfflineExposureValueKind.TAKER_MAX_FEE_PERCENT
+                and type(self.value) is Decimal
                 and self.value > 100
             )
             or any(
@@ -167,6 +182,7 @@ class OfflineExposureQualificationResult(EvidenceRecord):
             and type(self.source_identity) is ContentIdentity
         )
         passed = self.status is OfflineExposureStatus.PASSED
+        incomplete = self.status is OfflineExposureStatus.INCOMPLETE
         exact_routes = (OfflineExposureRoute.BALANCE_EX, OfflineExposureRoute.TRADE_VOLUME)
         if (
             type(self.status) is not OfflineExposureStatus
@@ -197,6 +213,9 @@ class OfflineExposureQualificationResult(EvidenceRecord):
                     or self.completed_routes != exact_routes
                     or len(self.request_identities) != 2
                     or len(self.evidence_identities) != 2
+                    or self.proofs[0].value_kind is not OfflineExposureValueKind.SPENDABLE_EUR
+                    or self.proofs[1].value_kind
+                    is not OfflineExposureValueKind.TAKER_MAX_FEE_PERCENT
                     or tuple(proof.request_identity for proof in self.proofs)
                     != self.request_identities
                     or any(
@@ -216,8 +235,31 @@ class OfflineExposureQualificationResult(EvidenceRecord):
                 )
             )
             or (
+                incomplete
+                and (
+                    self.reason_code is not OfflineExposureReason.EUR_BALANCE_NOT_OBSERVED
+                    or not source_valid
+                    or self.offline_observations < 1
+                    or self.completed_routes != (OfflineExposureRoute.BALANCE_EX,)
+                    or len(self.request_identities) != 2
+                    or len(self.proofs) != 1
+                    or self.proofs[0].value_kind
+                    is not OfflineExposureValueKind.EUR_BALANCE_NOT_OBSERVED
+                    or self.proofs[0].value is not None
+                    or self.proofs[0].request_identity != self.request_identities[0]
+                    or self.proofs[0].credential_reference_identity
+                    != self.credential_reference_identity
+                    or self.proofs[0].capability_identity != self.capability_identity
+                    or self.proofs[0].account_identity != self.account_identity
+                )
+            )
+            or (
                 not passed
                 and self.reason_code is OfflineExposureReason.OFFLINE_EXPOSURE_CONTRACT_QUALIFIED
+            )
+            or (
+                not incomplete
+                and self.reason_code is OfflineExposureReason.EUR_BALANCE_NOT_OBSERVED
             )
         ):
             raise EvidenceError("OFFLINE_EXPOSURE_QUALIFICATION_RESULT_INVALID")

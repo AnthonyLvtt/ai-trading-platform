@@ -220,6 +220,32 @@ def qualify_exposure_operator_gate(
         calls += exposure.private_network_calls
         routes += tuple(route.value for route in exposure.completed_routes)
         exposure_result_identity = exposure.content_identity
+        if exposure.status is ExposureConnectivityStatus.INCOMPLETE:
+            if exposure.reason_code is not ExposureConnectivityReason.EUR_BALANCE_NOT_OBSERVED:
+                raise _GateFailure(ExposureGateReason.EXPOSURE_INVALID)
+            try:
+                after = inspect_source(source_root)
+            except (ReleaseError, OSError):
+                raise _GateFailure(ExposureGateReason.SOURCE_INVALID) from None
+            if (
+                after != source
+                or not after.clean
+                or exposure.source_identity != source.content_identity
+            ):
+                raise _GateFailure(ExposureGateReason.SOURCE_INVALID)
+            return _result(
+                status=ExposureGateStatus.INCOMPLETE,
+                reason=ExposureGateReason.EUR_BALANCE_NOT_OBSERVED,
+                source=source,
+                account_identity=account_identity,
+                reference_identity=reference_identity,
+                capability_identity=capability_identity,
+                exposure_result_identity=exposure_result_identity,
+                routes=routes,
+                calls=calls,
+                started_at=started_at,
+                completed_at=clock(),
+            )
         if exposure.status is not ExposureConnectivityStatus.PASSED:
             reason = ExposureGateReason.EXPOSURE_INVALID
             if exposure.reason_code is ExposureConnectivityReason.API_REJECTED:

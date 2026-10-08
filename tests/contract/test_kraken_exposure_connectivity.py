@@ -164,8 +164,13 @@ def test_wrong_response_binding_and_malformed_evidence_fail_closed(clean_main) -
     transport = Transport()
     transport.payloads[0]["result"].pop("ZEUR")
     invalid = run(Loader(), transport)
-    assert invalid.reason_code is ExposureConnectivityReason.BALANCE_EUR_MISSING
+    assert invalid.status is ExposureConnectivityStatus.INCOMPLETE
+    assert invalid.reason_code is ExposureConnectivityReason.EUR_BALANCE_NOT_OBSERVED
     assert invalid.private_network_calls == 1
+    assert invalid.completed_routes == (OfflineExposureRoute.BALANCE_EX,)
+    assert invalid.proofs[0].value is None
+    assert transport.calls == 1
+    assert invalid.source_identity == clean_main.content_identity
 
 
 def test_stale_capability_blocks_before_credential_loading(clean_main) -> None:
@@ -180,6 +185,21 @@ def test_stale_capability_blocks_before_credential_loading(clean_main) -> None:
     result = run(loader, transport, capability=capability)
     assert result.reason_code is ExposureConnectivityReason.BINDING_INVALID
     assert loader.calls == transport.calls == 0
+
+
+def test_missing_eur_diagnostic_requires_unchanged_source(clean_main, monkeypatch) -> None:
+    values = iter((clean_main, replace(clean_main, source_commit_sha="b" * 40)))
+    monkeypatch.setattr(
+        "atp.kraken_private_qualification.exposure_connectivity.inspect_source",
+        lambda root: next(values),
+    )
+    transport = Transport()
+    del transport.payloads[0]["result"]["ZEUR"]
+    result = run(Loader(), transport)
+    assert result.status is ExposureConnectivityStatus.FAILED
+    assert result.reason_code is ExposureConnectivityReason.SOURCE_INVALID
+    assert result.private_network_calls == transport.calls == 1
+    assert result.source_identity is None
 
 
 def test_api_rejection_is_sanitized_and_stops_after_first_call(clean_main) -> None:

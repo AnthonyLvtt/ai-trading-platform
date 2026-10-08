@@ -20,7 +20,7 @@ from atp.kraken_private_qualification.exposure_gate import (
     account_identity_from_iiban,
     qualify_exposure_operator_gate,
 )
-
+from atp.kraken_private_qualification.exposure_gate_model import ExposureGateStatus
 
 CONFIRMATION = "KRAKEN_READ_ONLY_EXPOSURE_OBSERVATION"
 
@@ -52,7 +52,11 @@ def main() -> int:
     )
     document = dict(encoded(result)) | {"content_identity": str(result.content_identity)}
     print(json.dumps(document, sort_keys=True, separators=(",", ":")))
-    return 0 if result.status.value == "PASSED" else 1
+    if result.status is ExposureGateStatus.PASSED:
+        return 0
+    if result.status is ExposureGateStatus.INCOMPLETE:
+        return 2
+    return 1
 
 
 if __name__ == "__main__":

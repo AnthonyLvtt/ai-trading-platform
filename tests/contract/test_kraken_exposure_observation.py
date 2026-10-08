@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -151,20 +152,60 @@ def test_wrong_request_or_order_fails_without_network_call() -> None:
     assert reversed_result.reason_code is OfflineExposureReason.OBSERVATION_SEQUENCE_INVALID
 
 
-def test_missing_eur_or_fee_pair_fails_closed() -> None:
+def test_missing_eur_is_explicit_and_fee_pair_still_fails_closed() -> None:
     _, _, _, _, observations = inputs()
     balance = balance_ex_payload()
     del balance["result"]["ZEUR"]
     broken_balance = replace(observations[0], payload=balance)
-    assert qualify(observations=(broken_balance, observations[1])).reason_code is (
-        OfflineExposureReason.BALANCE_EUR_MISSING
-    )
+    incomplete = qualify(observations=(broken_balance, observations[1]))
+    assert incomplete.status is OfflineExposureStatus.INCOMPLETE
+    assert incomplete.reason_code is OfflineExposureReason.EUR_BALANCE_NOT_OBSERVED
+    assert incomplete.completed_routes == (OfflineExposureRoute.BALANCE_EX,)
+    assert incomplete.proofs[0].value_kind is OfflineExposureValueKind.EUR_BALANCE_NOT_OBSERVED
+    assert incomplete.proofs[0].value is None
+    assert incomplete.runtime_pass_qualified is False
+    with pytest.raises(EvidenceError, match="SANITIZED_EXPOSURE_OBSERVATION_INVALID"):
+        replace(incomplete.proofs[0], value=Decimal("0"))
     fees = trade_volume_payload()
     fees["result"]["fees"] = {}
     broken_fee = replace(observations[1], payload=fees)
     assert qualify(observations=(observations[0], broken_fee)).reason_code is (
         OfflineExposureReason.OBSERVATION_PAYLOAD_INVALID
     )
+
+
+def test_explicit_zero_eur_row_remains_numeric_spendable_proof() -> None:
+    _, _, _, _, observations = inputs()
+    balance = balance_ex_payload()
+    balance["result"]["ZEUR"] = {
+        "balance": "0",
+        "hold_trade": "0",
+        "credit": "0",
+        "credit_used": "0",
+    }
+    result = qualify(observations=(replace(observations[0], payload=balance), observations[1]))
+    assert result.status is OfflineExposureStatus.PASSED
+    assert result.proofs[0].value_kind is OfflineExposureValueKind.SPENDABLE_EUR
+    assert result.proofs[0].value == 0
+
+
+def test_missing_eur_does_not_hide_incomplete_btc_or_unknown_asset() -> None:
+    _, _, _, _, observations = inputs()
+    balance = balance_ex_payload()
+    del balance["result"]["ZEUR"]
+    del balance["result"]["XXBT"]["credit_used"]
+    incomplete_fields = qualify(
+        observations=(replace(observations[0], payload=balance), observations[1])
+    )
+    assert incomplete_fields.status is OfflineExposureStatus.FAILED
+    assert incomplete_fields.reason_code is OfflineExposureReason.BALANCE_FIELDS_INCOMPLETE
+    balance["result"]["XXBT"]["credit_used"] = "0"
+    balance["result"]["UNKNOWN"] = {}
+    unknown_asset = qualify(
+        observations=(replace(observations[0], payload=balance), observations[1])
+    )
+    assert unknown_asset.status is OfflineExposureStatus.FAILED
+    assert unknown_asset.reason_code is OfflineExposureReason.BALANCE_ASSET_UNSUPPORTED
 
 
 def test_stale_or_extra_observation_fails() -> None:

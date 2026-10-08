@@ -42,6 +42,14 @@ def test_offline_formula_and_route_remains_closed() -> None:
     assert "/0/private/BalanceEx" not in KRAKEN_PRIVATE_READ_ROUTE_ALLOWLIST
 
 
+def test_missing_eur_row_does_not_create_zero_balance() -> None:
+    payload = fixture()
+    del payload["result"]["ZEUR"]
+    rows = parse_offline_extended_balance(payload)
+    assert [row.asset for row in rows] == ["BTC"]
+    assert not any(row.asset == "EUR" for row in rows)
+
+
 def test_available_amount_retains_digits_beyond_default_decimal_precision() -> None:
     payload = fixture()
     eur = payload["result"]["ZEUR"]

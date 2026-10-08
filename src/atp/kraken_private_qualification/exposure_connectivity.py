@@ -35,6 +35,7 @@ from atp.kraken_private_qualification.exposure_observation_model import (
     OfflineExposureReason,
     OfflineExposureRequest,
     OfflineExposureRoute,
+    OfflineExposureValueKind,
     SanitizedExposureObservation,
 )
 from atp.release_deployment.model import ReleaseError, SourceTree
@@ -65,6 +66,15 @@ def _source(root: Path, expected_sha: str) -> SourceTree:
     ):
         raise _Failure(ExposureConnectivityReason.SOURCE_INVALID)
     return source
+
+
+def _source_after(root: Path, source: SourceTree) -> None:
+    try:
+        after = inspect_source(root)
+    except (ReleaseError, OSError):
+        raise _Failure(ExposureConnectivityReason.SOURCE_INVALID) from None
+    if after != source or not after.clean:
+        raise _Failure(ExposureConnectivityReason.SOURCE_INVALID)
 
 
 def _checked_observation(
@@ -218,12 +228,23 @@ def qualify_exposure_connectivity(
             routes = (*routes, request.route)
             proofs = (*proofs, proof)
             previous_at = observation.observed_at
-        try:
-            after = inspect_source(source_root)
-        except (ReleaseError, OSError):
-            raise _Failure(ExposureConnectivityReason.SOURCE_INVALID) from None
-        if after != source or not after.clean:
-            raise _Failure(ExposureConnectivityReason.SOURCE_INVALID)
+            if proof.value_kind is OfflineExposureValueKind.EUR_BALANCE_NOT_OBSERVED:
+                _source_after(source_root, source)
+                return _result(
+                    status=ExposureConnectivityStatus.INCOMPLETE,
+                    reason=ExposureConnectivityReason.EUR_BALANCE_NOT_OBSERVED,
+                    started_at=started_at,
+                    completed_at=clock(),
+                    source=source,
+                    reference_identity=reference_identity,
+                    capability_identity=capability_identity,
+                    account_identity=bound_account,
+                    requests=requests,
+                    proofs=proofs,
+                    routes=routes,
+                    calls=calls,
+                )
+        _source_after(source_root, source)
         return _result(
             status=ExposureConnectivityStatus.PASSED,
             reason=ExposureConnectivityReason.QUALIFIED,
