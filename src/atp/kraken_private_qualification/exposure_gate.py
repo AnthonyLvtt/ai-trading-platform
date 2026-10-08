@@ -230,6 +230,12 @@ def qualify_exposure_operator_gate(
                 reason = ExposureGateReason.EXPOSURE_RESPONSE_INVALID
             elif exposure.reason_code is ExposureConnectivityReason.NETWORK_FAILURE:
                 reason = ExposureGateReason.EXPOSURE_NETWORK_FAILURE
+            elif exposure.reason_code is ExposureConnectivityReason.BALANCE_ASSET_UNSUPPORTED:
+                reason = ExposureGateReason.BALANCE_ASSET_UNSUPPORTED
+            elif exposure.reason_code is ExposureConnectivityReason.BALANCE_FIELDS_INCOMPLETE:
+                reason = ExposureGateReason.BALANCE_FIELDS_INCOMPLETE
+            elif exposure.reason_code is ExposureConnectivityReason.BALANCE_EUR_MISSING:
+                reason = ExposureGateReason.BALANCE_EUR_MISSING
             raise _GateFailure(reason)
         try:
             after = inspect_source(source_root)
