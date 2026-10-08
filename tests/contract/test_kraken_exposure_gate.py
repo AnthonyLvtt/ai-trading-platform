@@ -308,6 +308,7 @@ def test_kraken_api_rejection_reports_sanitized_reason(clean_main) -> None:
     assert exposure.calls == 1
     assert "Permission denied" not in json.dumps(encoded(result))
 
+
 def test_balanceex_unsupported_asset_reports_sanitized_reason(clean_main) -> None:
     loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
     exposure.payloads[0]["result"]["SECRET_ASSET"] = {
