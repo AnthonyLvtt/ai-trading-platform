@@ -164,7 +164,7 @@ def test_wrong_response_binding_and_malformed_evidence_fail_closed(clean_main) -
     transport = Transport()
     transport.payloads[0]["result"].pop("ZEUR")
     invalid = run(Loader(), transport)
-    assert invalid.reason_code is ExposureConnectivityReason.EVIDENCE_INVALID
+    assert invalid.reason_code is ExposureConnectivityReason.BALANCE_EUR_MISSING
     assert invalid.private_network_calls == 1
 
 
