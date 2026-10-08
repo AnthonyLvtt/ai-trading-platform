@@ -221,23 +221,16 @@ def qualify_exposure_operator_gate(
         routes += tuple(route.value for route in exposure.completed_routes)
         exposure_result_identity = exposure.content_identity
         if exposure.status is not ExposureConnectivityStatus.PASSED:
-            reasons = {
-                ExposureConnectivityReason.API_REJECTED: (
-                    ExposureGateReason.EXPOSURE_API_REJECTED
-                ),
-                ExposureConnectivityReason.EVIDENCE_INVALID: (
-                    ExposureGateReason.EXPOSURE_EVIDENCE_INVALID
-                ),
-                ExposureConnectivityReason.RESPONSE_INVALID: (
-                    ExposureGateReason.EXPOSURE_RESPONSE_INVALID
-                ),
-                ExposureConnectivityReason.NETWORK_FAILURE: (
-                    ExposureGateReason.EXPOSURE_NETWORK_FAILURE
-                ),
-            }
-            raise _GateFailure(
-                reasons.get(exposure.reason_code, ExposureGateReason.EXPOSURE_INVALID)
-            )
+            reason = ExposureGateReason.EXPOSURE_INVALID
+            if exposure.reason_code is ExposureConnectivityReason.API_REJECTED:
+                reason = ExposureGateReason.EXPOSURE_API_REJECTED
+            elif exposure.reason_code is ExposureConnectivityReason.EVIDENCE_INVALID:
+                reason = ExposureGateReason.EXPOSURE_EVIDENCE_INVALID
+            elif exposure.reason_code is ExposureConnectivityReason.RESPONSE_INVALID:
+                reason = ExposureGateReason.EXPOSURE_RESPONSE_INVALID
+            elif exposure.reason_code is ExposureConnectivityReason.NETWORK_FAILURE:
+                reason = ExposureGateReason.EXPOSURE_NETWORK_FAILURE
+            raise _GateFailure(reason)
         try:
             after = inspect_source(source_root)
         except (ReleaseError, OSError):
