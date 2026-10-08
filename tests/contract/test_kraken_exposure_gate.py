@@ -307,3 +307,29 @@ def test_kraken_api_rejection_reports_sanitized_reason(clean_main) -> None:
     assert result.total_private_network_calls == 2
     assert exposure.calls == 1
     assert "Permission denied" not in json.dumps(encoded(result))
+
+def test_balanceex_unsupported_asset_reports_sanitized_reason(clean_main) -> None:
+    loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
+    exposure.payloads[0]["result"]["SECRET_ASSET"] = {
+        "balance": "123456.78",
+        "hold_trade": "0",
+        "credit": "0",
+        "credit_used": "0",
+    }
+    result = run(loader, key_info, exposure)
+    assert result.reason_code is ExposureGateReason.BALANCE_ASSET_UNSUPPORTED
+    assert result.total_private_network_calls == 2
+    assert exposure.calls == 1
+    serialized = json.dumps(encoded(result))
+    assert "SECRET_ASSET" not in serialized
+    assert "123456.78" not in serialized
+
+
+def test_balanceex_missing_eur_reports_sanitized_reason(clean_main) -> None:
+    loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
+    del exposure.payloads[0]["result"]["ZEUR"]
+    result = run(loader, key_info, exposure)
+    assert result.reason_code is ExposureGateReason.BALANCE_EUR_MISSING
+    assert result.total_private_network_calls == 2
+    assert exposure.calls == 1
+
