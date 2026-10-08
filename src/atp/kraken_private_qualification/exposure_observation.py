@@ -125,6 +125,8 @@ def _proof(
             source_identity=ContentIdentity.from_canonical(observation.payload),
             observed_at=observation.observed_at,
         )
+    except _OfflineFailure:
+        raise
     except ExtendedBalanceShapeError as exc:
         reason = OfflineExposureReason.OBSERVATION_PAYLOAD_INVALID
         if str(exc) == "BALANCE_EX_ASSET_UNSUPPORTED":
