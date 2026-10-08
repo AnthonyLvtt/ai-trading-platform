@@ -234,7 +234,7 @@ def test_missing_credit_field_fails_closed_after_balance_ex(clean_main) -> None:
     loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
     del exposure.payloads[0]["result"]["ZEUR"]["credit_used"]
     result = run(loader, key_info, exposure)
-    assert result.reason_code is ExposureGateReason.EXPOSURE_EVIDENCE_INVALID
+    assert result.reason_code is ExposureGateReason.BALANCE_FIELDS_INCOMPLETE
     assert result.total_private_network_calls == 2
     assert exposure.calls == 1
     assert result.source_identity is None
