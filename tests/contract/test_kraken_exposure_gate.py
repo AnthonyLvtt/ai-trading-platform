@@ -12,7 +12,10 @@ import pytest
 from atp.exchange.kraken.exposure_transport import KrakenExposureHTTPObservation
 from atp.exchange.kraken.private import KrakenPrivateReadRoute
 from atp.exchange.kraken.private_credentials import EphemeralKrakenCredential
-from atp.exchange.kraken.private_transport import KrakenPrivateHTTPObservation
+from atp.exchange.kraken.private_transport import (
+    KrakenPrivateHTTPObservation,
+    KrakenPrivateTransportError,
+)
 from atp.exchange.read_only import EvidenceError, encoded
 from atp.kraken_private_qualification.exposure_gate import (
     account_identity_from_iiban,
@@ -106,9 +109,11 @@ def clean_main(monkeypatch):
     return source
 
 
-def run(loader, key_info, exposure, *, account=None):
+def run(loader, key_info, exposure, *, account=None, clock_values=None):
     times = iter(
-        (
+        clock_values
+        or (
+            AT,
             AT,
             AT + timedelta(seconds=1),
             AT + timedelta(seconds=4),
@@ -230,6 +235,54 @@ def test_extra_permission_blocks_before_exposure(clean_main) -> None:
     assert exposure.calls == 0
 
 
+def test_malformed_permission_evidence_is_distinct_and_stops_exposure(clean_main) -> None:
+    loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
+    key_info.payload["result"]["permissions"] = "query-funds"
+    result = run(loader, key_info, exposure)
+    assert result.reason_code is ExposureGateReason.KEY_INFO_PERMISSION_EVIDENCE_INVALID
+    assert result.total_private_network_calls == 1
+    assert result.completed_routes == ("/0/private/GetApiKeyInfo",)
+    assert exposure.calls == 0
+
+
+def test_key_info_api_rejection_is_sanitized_and_stops_exposure(clean_main) -> None:
+    loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
+    key_info.payload = {
+        "error": ["EAPI:synthetic-private-rejection"],
+        "result": {},
+    }
+    result = run(loader, key_info, exposure)
+    assert result.reason_code is ExposureGateReason.KEY_INFO_API_REJECTED
+    assert result.total_private_network_calls == 1
+    assert result.completed_routes == ()
+    assert exposure.calls == 0
+    assert "synthetic-private-rejection" not in json.dumps(encoded(result))
+
+
+def test_malformed_key_info_response_is_sanitized_and_stops_exposure(clean_main) -> None:
+    loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
+    key_info.payload = {"error": [], "result": []}
+    result = run(loader, key_info, exposure)
+    assert result.reason_code is ExposureGateReason.KEY_INFO_RESPONSE_INVALID
+    assert result.total_private_network_calls == 1
+    assert result.completed_routes == ()
+    assert exposure.calls == 0
+
+
+def test_key_info_transport_failure_is_sanitized_and_stops_exposure(clean_main) -> None:
+    class FailedKeyInfoTransport(KeyInfoTransport):
+        def post(self, request, credential, nonce_provider):
+            self.calls += 1
+            raise KrakenPrivateTransportError("KRAKEN_PRIVATE_TIMEOUT", network_call_performed=True)
+
+    loader, key_info, exposure = Loader(), FailedKeyInfoTransport(), ExposureTransport()
+    result = run(loader, key_info, exposure)
+    assert result.reason_code is ExposureGateReason.KEY_INFO_TRANSPORT_FAILURE
+    assert result.total_private_network_calls == 1
+    assert result.completed_routes == ()
+    assert exposure.calls == 0
+
+
 def test_missing_credit_field_fails_closed_after_balance_ex(clean_main) -> None:
     loader, key_info, exposure = Loader(), KeyInfoTransport(), ExposureTransport()
     del exposure.payloads[0]["result"]["ZEUR"]["credit_used"]
@@ -277,9 +330,63 @@ def test_stale_key_info_response_blocks_exposure(clean_main) -> None:
 
     loader, key_info, exposure = Loader(), StaleKeyInfoTransport(), ExposureTransport()
     result = run(loader, key_info, exposure)
-    assert result.reason_code is ExposureGateReason.KEY_INFO_INVALID
+    assert result.reason_code is ExposureGateReason.KEY_INFO_TIME_INVALID
     assert result.total_private_network_calls == 1
     assert exposure.calls == 0
+
+
+def test_incoherent_key_info_timestamps_block_exposure(clean_main) -> None:
+    class IncoherentKeyInfoTransport(KeyInfoTransport):
+        def post(self, request, credential, nonce_provider):
+            observation = super().post(request, credential, nonce_provider)
+            return replace(
+                observation,
+                request_started_at=AT + timedelta(seconds=2),
+                observed_at=AT + timedelta(seconds=1),
+            )
+
+    loader = Loader()
+    exposure = ExposureTransport()
+    result = run(loader, IncoherentKeyInfoTransport(), exposure)
+    assert result.reason_code is ExposureGateReason.KEY_INFO_TIME_INVALID
+    assert result.total_private_network_calls == 1
+    assert exposure.calls == 0
+
+
+def test_interactive_delay_before_request_does_not_expire_fresh_response(clean_main) -> None:
+    class DelayedKeyInfoTransport(KeyInfoTransport):
+        def post(self, request, credential, nonce_provider):
+            observation = super().post(request, credential, nonce_provider)
+            return replace(
+                observation,
+                request_started_at=AT + timedelta(seconds=40),
+                observed_at=AT + timedelta(seconds=41),
+            )
+
+    class DelayedExposureTransport(ExposureTransport):
+        def post(self, request, credential, nonce_provider):
+            observation = super().post(request, credential, nonce_provider)
+            moment = AT + timedelta(seconds=41 + self.calls)
+            return replace(
+                observation,
+                request_started_at=moment,
+                observed_at=moment,
+            )
+
+    result = run(
+        Loader(),
+        DelayedKeyInfoTransport(),
+        DelayedExposureTransport(),
+        clock_values=(
+            AT,
+            AT + timedelta(seconds=39),
+            AT + timedelta(seconds=41),
+            AT + timedelta(seconds=44),
+            AT + timedelta(seconds=45),
+        ),
+    )
+    assert result.status is ExposureGateStatus.PASSED
+    assert result.total_private_network_calls == 3
 
 
 def test_wrong_key_info_route_is_not_reported_completed(clean_main) -> None:
@@ -290,7 +397,7 @@ def test_wrong_key_info_route_is_not_reported_completed(clean_main) -> None:
 
     loader, key_info, exposure = Loader(), WrongRouteTransport(), ExposureTransport()
     result = run(loader, key_info, exposure)
-    assert result.reason_code is ExposureGateReason.KEY_INFO_INVALID
+    assert result.reason_code is ExposureGateReason.KEY_INFO_RESPONSE_INVALID
     assert result.total_private_network_calls == 1
     assert result.completed_routes == ()
     assert exposure.calls == 0
