@@ -32,6 +32,7 @@ from atp.kraken_private_qualification.exposure_observation import (
 )
 from atp.kraken_private_qualification.exposure_observation_model import (
     OfflineExposureObservation,
+    OfflineExposureReason,
     OfflineExposureRequest,
     OfflineExposureRoute,
     SanitizedExposureObservation,
@@ -100,8 +101,15 @@ def _checked_observation(
             ),
             request,
         )
-    except _OfflineFailure:
-        raise _Failure(ExposureConnectivityReason.EVIDENCE_INVALID) from None
+    except _OfflineFailure as exc:
+        reason = ExposureConnectivityReason.EVIDENCE_INVALID
+        if exc.reason is OfflineExposureReason.BALANCE_ASSET_UNSUPPORTED:
+            reason = ExposureConnectivityReason.BALANCE_ASSET_UNSUPPORTED
+        elif exc.reason is OfflineExposureReason.BALANCE_FIELDS_INCOMPLETE:
+            reason = ExposureConnectivityReason.BALANCE_FIELDS_INCOMPLETE
+        elif exc.reason is OfflineExposureReason.BALANCE_EUR_MISSING:
+            reason = ExposureConnectivityReason.BALANCE_EUR_MISSING
+        raise _Failure(reason) from None
 
 
 def _result(

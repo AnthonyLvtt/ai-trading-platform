@@ -157,7 +157,7 @@ def test_missing_eur_or_fee_pair_fails_closed() -> None:
     del balance["result"]["ZEUR"]
     broken_balance = replace(observations[0], payload=balance)
     assert qualify(observations=(broken_balance, observations[1])).reason_code is (
-        OfflineExposureReason.OBSERVATION_PAYLOAD_INVALID
+        OfflineExposureReason.BALANCE_EUR_MISSING
     )
     fees = trade_volume_payload()
     fees["result"]["fees"] = {}
