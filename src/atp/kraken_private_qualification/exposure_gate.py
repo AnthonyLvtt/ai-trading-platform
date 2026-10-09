@@ -71,28 +71,38 @@ def _binding(
     observation: KrakenPrivateHTTPObservation,
     credential: EphemeralKrakenCredential,
     expected_account_identity: ContentIdentity,
-    started_at: datetime,
+    request_not_before: datetime,
 ) -> tuple[ContentIdentity, object]:
     if (
         type(observation) is not KrakenPrivateHTTPObservation
         or observation.route is not KrakenPrivateReadRoute.API_KEY_INFO
-        or type(observation.request_started_at) is not datetime
+    ):
+        raise _GateFailure(ExposureGateReason.KEY_INFO_RESPONSE_INVALID)
+    if (
+        type(observation.request_started_at) is not datetime
         or observation.request_started_at.tzinfo is None
         or type(observation.observed_at) is not datetime
         or observation.observed_at.tzinfo is None
-        or not started_at <= observation.request_started_at <= observation.observed_at
-        or observation.observed_at - started_at > timedelta(seconds=30)
+        or not request_not_before <= observation.request_started_at <= observation.observed_at
+        or observation.observed_at - observation.request_started_at > timedelta(seconds=30)
     ):
-        raise _GateFailure(ExposureGateReason.KEY_INFO_INVALID)
+        raise _GateFailure(ExposureGateReason.KEY_INFO_TIME_INVALID)
     payload = observation.payload
     if (
         type(payload) is not dict
         or set(payload) != {"error", "result"}
         or type(payload.get("error")) is not list
-        or payload["error"]
-        or type(payload.get("result")) is not dict
     ):
-        raise _GateFailure(ExposureGateReason.KEY_INFO_INVALID)
+        raise _GateFailure(ExposureGateReason.KEY_INFO_RESPONSE_INVALID)
+    if payload["error"]:
+        reason = (
+            ExposureGateReason.KEY_INFO_API_REJECTED
+            if all(type(error) is str for error in payload["error"])
+            else ExposureGateReason.KEY_INFO_RESPONSE_INVALID
+        )
+        raise _GateFailure(reason)
+    if type(payload.get("result")) is not dict:
+        raise _GateFailure(ExposureGateReason.KEY_INFO_RESPONSE_INVALID)
     result = payload["result"]
     api_key = result.get("apiKey")
     iiban = result.get("iban")
@@ -117,6 +127,30 @@ def _binding(
     if account_identity != expected_account_identity:
         raise _GateFailure(ExposureGateReason.IIBAN_MISMATCH)
     return account_identity, payload
+
+
+def _transport_failure_reason(exc: KrakenPrivateTransportError) -> ExposureGateReason:
+    code = str(exc)
+    if code in {"KRAKEN_CREDENTIAL_INVALID", "KRAKEN_NONCE_OR_SIGNING_FAILURE"}:
+        return ExposureGateReason.CREDENTIAL_INVALID
+    if code in {
+        "KRAKEN_PRIVATE_RESPONSE_INVALID",
+        "KRAKEN_PRIVATE_RESPONSE_TOO_LARGE",
+        "KRAKEN_PRIVATE_JSON_INVALID",
+    }:
+        return ExposureGateReason.KEY_INFO_RESPONSE_INVALID
+    return ExposureGateReason.KEY_INFO_TRANSPORT_FAILURE
+
+
+def _capability_failure_reason(exc: KrakenPrivateError | EvidenceError) -> ExposureGateReason:
+    code = str(exc)
+    if code == "KRAKEN_LEAST_PRIVILEGE_REQUIRED":
+        return ExposureGateReason.LEAST_PRIVILEGE_REQUIRED
+    if code in {"KRAKEN_API_KEY_INFO_INVALID", "KRAKEN_PERMISSION_EVIDENCE_INVALID"}:
+        return ExposureGateReason.KEY_INFO_PERMISSION_EVIDENCE_INVALID
+    if code == "KRAKEN_PRIVATE_TIME_INVALID":
+        return ExposureGateReason.KEY_INFO_TIME_INVALID
+    return ExposureGateReason.KEY_INFO_INVALID
 
 
 def _result(
@@ -188,25 +222,21 @@ def qualify_exposure_operator_gate(
         reference_identity = credential.reference.content_identity
         request = api_key_info_request(credential)
         nonce_provider = MonotonicNonceProvider(reference_identity)
+        request_not_before = clock()
         try:
             observation = key_info_transport.post(request, credential, nonce_provider)
         except KrakenPrivateTransportError as exc:
             calls += int(exc.network_call_performed)
-            raise _GateFailure(ExposureGateReason.KEY_INFO_INVALID) from None
+            raise _GateFailure(_transport_failure_reason(exc)) from None
         calls += 1
         account_identity, payload = _binding(
-            observation, credential, expected_account_identity, started_at
+            observation, credential, expected_account_identity, request_not_before
         )
         routes = (KrakenPrivateReadRoute.API_KEY_INFO.value,)
         try:
             capability = parse_api_key_info(payload, credential.reference, observation.observed_at)
         except (KrakenPrivateError, EvidenceError) as exc:
-            reason = (
-                ExposureGateReason.LEAST_PRIVILEGE_REQUIRED
-                if str(exc) == "KRAKEN_LEAST_PRIVILEGE_REQUIRED"
-                else ExposureGateReason.KEY_INFO_INVALID
-            )
-            raise _GateFailure(reason) from None
+            raise _GateFailure(_capability_failure_reason(exc)) from None
         capability_identity = capability.content_identity
         exposure = qualify_exposure_connectivity(
             expected_source_sha=expected_source_sha,
